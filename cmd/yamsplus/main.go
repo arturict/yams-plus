@@ -158,7 +158,7 @@ func install(ctx context.Context, paths layout.Layout, args []string) error {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	configPath := fs.String("config", "", "existing desired-state YAML")
 	dryRun := fs.Bool("dry-run", false, "show changes without writing or starting services")
-	skipStart := fs.Bool("skip-start", false, "render files without starting Docker")
+	skipStart := fs.Bool("skip-start", false, "render files without host runtime checks or starting Docker")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func install(ctx context.Context, paths layout.Layout, args []string) error {
 			values[name] = value
 		}
 	}
-	eng := engine.Engine{Options: engine.Options{Paths: paths, DryRun: *dryRun, SkipStart: *skipStart, AdminPassword: password, SecretValues: values, Out: func(format string, values ...any) { fmt.Printf(format, values...) }}}
+	eng := engine.Engine{Options: engine.Options{Paths: paths, DryRun: *dryRun, SkipPreflight: *skipStart, SkipStart: *skipStart, AdminPassword: password, SecretValues: values, Out: func(format string, values ...any) { fmt.Printf(format, values...) }}}
 	return eng.Apply(ctx, cfg)
 }
 
@@ -227,7 +227,7 @@ func plan(paths layout.Layout, args []string) error {
 func apply(ctx context.Context, paths layout.Layout, args []string) error {
 	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "show changes only")
-	skipStart := fs.Bool("skip-start", false, "do not start containers")
+	skipStart := fs.Bool("skip-start", false, "render files without host runtime checks or starting containers")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -251,7 +251,7 @@ func apply(ctx context.Context, paths layout.Layout, args []string) error {
 			return err
 		}
 	}
-	return (engine.Engine{Options: engine.Options{Paths: paths, DryRun: *dryRun, SkipStart: *skipStart, AdminPassword: password, SecretValues: values, Out: func(format string, values ...any) { fmt.Printf(format, values...) }}}).Apply(ctx, cfg)
+	return (engine.Engine{Options: engine.Options{Paths: paths, DryRun: *dryRun, SkipPreflight: *skipStart, SkipStart: *skipStart, AdminPassword: password, SecretValues: values, Out: func(format string, values ...any) { fmt.Printf(format, values...) }}}).Apply(ctx, cfg)
 }
 
 func collectMissingSecrets(paths layout.Layout, cfg config.Config) (map[string]string, error) {

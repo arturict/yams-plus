@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/arturict/yams-plus/internal/config"
@@ -8,6 +10,27 @@ import (
 	"github.com/arturict/yams-plus/internal/layout"
 	"github.com/arturict/yams-plus/internal/secrets"
 )
+
+func TestInstallSkipStartDoesNotRequireDocker(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "desired.yaml")
+	cfg := config.Default()
+	cfg.AdminUsername = "captain"
+	cfg.Downloads.Usenet.Host = "news.example.test"
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	// A render-only installation must work on a machine that does not yet have
+	// Docker. Runtime validation still runs for a real installation.
+	t.Setenv("PATH", "")
+	if err := run([]string{"--root", root, "install", "--config", configPath, "--skip-start"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(layout.New(root).ComposeFile()); err != nil {
+		t.Fatalf("rendered compose file: %v", err)
+	}
+}
 
 func TestCollectMissingSecretsUsesEnvironmentAndPreservesStore(t *testing.T) {
 	cfg := config.Default()
