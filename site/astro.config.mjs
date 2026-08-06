@@ -1,7 +1,6 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-const deploymentHost = process.env.VERCEL_URL;
 const productionDomain = 'yamsplus-guide.vercel.app';
 const defaultUmamiWebsiteId = 'f96b52f3-0218-4a31-ba34-0c3753efa7d8';
 const umamiWebsiteId = process.env.PUBLIC_UMAMI_WEBSITE_ID === undefined
@@ -30,7 +29,7 @@ const analyticsHead = umamiWebsiteId ? [
 ] : [];
 
 export default defineConfig({
-  site: deploymentHost ? `https://${deploymentHost}` : 'http://localhost:4321',
+  site: `https://${productionDomain}`,
   integrations: [
     starlight({
       title: 'YAMS Plus',
