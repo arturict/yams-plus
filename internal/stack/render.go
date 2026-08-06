@@ -242,6 +242,17 @@ func RequiredDirectories(cfg config.Config, paths layout.Layout) []string {
 }
 
 func EnsureDirectories(cfg config.Config, paths layout.Layout) error {
+	return ensureDirectories(cfg, paths, true)
+}
+
+// EnsureRenderDirectories prepares an isolated render root without changing
+// host ownership. Containers are not started in this mode, so ownership is
+// converged later by the first real apply.
+func EnsureRenderDirectories(cfg config.Config, paths layout.Layout) error {
+	return ensureDirectories(cfg, paths, false)
+}
+
+func ensureDirectories(cfg config.Config, paths layout.Layout, enforceOwnership bool) error {
 	appsRoot := filepath.Clean(paths.AppsDir())
 	dataRoot := filepath.Clean(paths.DataDir(cfg.DataRoot))
 	recyclarrRoot := filepath.Clean(paths.RecyclarrDir())
@@ -256,7 +267,7 @@ func EnsureDirectories(cfg config.Config, paths layout.Layout) error {
 		if err := os.Chmod(dir, mode); err != nil {
 			return fmt.Errorf("set permissions on %s: %w", dir, err)
 		}
-		if runtime.GOOS != "windows" && (within(dir, appsRoot) || within(dir, dataRoot) || within(dir, recyclarrRoot)) {
+		if enforceOwnership && runtime.GOOS != "windows" && (within(dir, appsRoot) || within(dir, dataRoot) || within(dir, recyclarrRoot)) {
 			if err := os.Chown(dir, cfg.Runtime.PUID, cfg.Runtime.PGID); err != nil {
 				return fmt.Errorf("set ownership on %s: %w", dir, err)
 			}

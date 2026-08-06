@@ -92,7 +92,7 @@ jobs:
       - id: images
         name: Read immutable images from the stack lock
         run: |
-          matrix=$(ruby -ryaml -rjson -e 'puts({include: YAML.load_file("stack/stack.lock.yaml").fetch("services").map { |name, service| {name: name, image: service.fetch("image")} }}.to_json)')
+          matrix=$(ruby -ryaml -rjson -e 'lock = YAML.safe_load_file("stack/stack.lock.yaml", permitted_classes: [Time]); puts({include: lock.fetch("services").map { |name, service| {name: name, image: service.fetch("image")} }}.to_json)')
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   container-scan:

@@ -85,7 +85,11 @@ func (e Engine) Apply(ctx context.Context, cfg config.Config) error {
 	if e.Options.DryRun {
 		return nil
 	}
-	if err := stack.EnsureDirectories(cfg, e.Options.Paths); err != nil {
+	ensureDirectories := stack.EnsureDirectories
+	if e.Options.SkipStart {
+		ensureDirectories = stack.EnsureRenderDirectories
+	}
+	if err := ensureDirectories(cfg, e.Options.Paths); err != nil {
 		return err
 	}
 	if err := config.Save(e.Options.Paths.ConfigFile(), cfg); err != nil {
@@ -105,9 +109,6 @@ func (e Engine) Apply(ctx context.Context, cfg config.Config) error {
 	if err := stack.Write(files); err != nil {
 		return err
 	}
-	if err := stack.EnsureRuntimeOwnership(cfg, e.Options.Paths); err != nil {
-		return err
-	}
 	configRaw, _ := yaml.Marshal(cfg)
 	current := state.State{Phase: "rendered", ConfigDigest: state.Digest(configRaw), Services: map[string]string{}, Actions: []string{"add at least one legal indexer in Prowlarr"}}
 	if err := state.Save(e.Options.Paths.StateFile(), current); err != nil {
@@ -115,6 +116,9 @@ func (e Engine) Apply(ctx context.Context, cfg config.Config) error {
 	}
 	if e.Options.SkipStart {
 		return nil
+	}
+	if err := stack.EnsureRuntimeOwnership(cfg, e.Options.Paths); err != nil {
+		return err
 	}
 	client := docker.Client{ComposeFile: e.Options.Paths.ComposeFile(), ProjectDir: e.Options.Paths.InstallDir(), Timeout: 20 * time.Minute}
 	if err := client.Validate(ctx); err != nil {
