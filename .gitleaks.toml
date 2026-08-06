@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ephemeral local integration root; ignored by Git and never released"
+paths = [
+  '''(^|/)\.yamsplus-test/''',
+]

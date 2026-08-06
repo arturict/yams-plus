@@ -1,0 +1,40 @@
+schemaVersion: 1
+resolvedAt: 2026-08-04T00:00:00Z
+architecture: amd64
+services:
+  jellyfin:
+    version: 10.11.11
+    image: jellyfin/jellyfin:10.11.11@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
+  seerr:
+    version: 3.4.1
+    image: ghcr.io/seerr-team/seerr:v3.4.1@sha256:f4768de5f616248d723e05891f3345a1402123775d03bf0890dbfedc0831bda1
+  radarr:
+    version: 6.3.0.10514
+    image: lscr.io/linuxserver/radarr:version-6.3.0.10514@sha256:a45b5ab0f850f39edb4cc9c95bbd967b52ddc3d4574a4dfb45561177db6c88f4
+  sonarr:
+    version: 4.0.19.2979
+    image: lscr.io/linuxserver/sonarr:version-4.0.19.2979@sha256:24acea2956a0ccb11f103877d9f4f8576600fb34bff34820ed749c2256dab89f
+  prowlarr:
+    version: 2.5.2.5491
+    image: lscr.io/linuxserver/prowlarr:version-2.5.2.5491@sha256:2f3d31307beba3ba2dd226d191f5f5c14ee3b4d8b49277c64683f5ed97083179
+  bazarr:
+    version: 1.6.0
+    image: lscr.io/linuxserver/bazarr:version-v1.6.0@sha256:ab401a0f361cfad328e444838b13d5b334b189d0f556fc91a3623eb581df36df
+  sabnzbd:
+    version: 5.0.4
+    image: lscr.io/linuxserver/sabnzbd:version-5.0.4@sha256:302be8972d4627222a0701634f2f9025826d760d856414aa6e67c0a66833e5be
+  qbittorrent:
+    version: 5.2.3
+    image: lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.13-ls469@sha256:b024436f8ca665d16d9a997d26fd27fdf867ee5566ba09f32764e7b2976d3e02
+  gluetun:
+    version: 3.41.3
+    image: qmcgaw/gluetun:v3.41.3@sha256:fa19cc76b2af13d57a8d3dc3066f2ada061b1c761b8aecf989b3877c0486e027
+  recyclarr:
+    version: 8.7.0
+    image: ghcr.io/recyclarr/recyclarr:8.7.0@sha256:2d6107f758d882a59fe9d646aa54fa8a5a4fb7a40995125fade575652a3f7871
+  audiobookshelf:
+    version: 2.36.0
+    image: ghcr.io/advplyr/audiobookshelf:2.36.0@sha256:180acad33d69c99ed208676465d8edcb268fa46967735579a7810859885b1a8e
+  shelfmark:
+    version: 1.3.5
+    image: ghcr.io/calibrain/shelfmark:v1.3.5@sha256:bd314405a9ca1eb176d1618c38f19948a1feb18ec4190a7665d3096163eab0a4

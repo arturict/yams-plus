@@ -1,0 +1,14 @@
+.idea/
+.vscode/
+.DS_Store
+*.exe
+*.test
+coverage.out
+dist/
+site/node_modules/
+site/.astro/
+site/dist/
+site/test-results/
+site/playwright-report/
+.yamsplus-test/
+acceptance/private/

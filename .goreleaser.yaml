@@ -1,0 +1,55 @@
+version: 2
+
+project_name: yamsplus
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: linux-amd64
+    main: ./cmd/yamsplus
+    binary: yamsplus
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64]
+    # GoReleaser expects a Unix timestamp for built binaries.
+    mod_timestamp: 946684800
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - ids: [linux-amd64]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info:
+      owner: root
+      group: root
+      mode: 0755
+      mtime: 2000-01-01T00:00:00Z
+    files:
+      - src: LICENSE
+        info: {owner: root, group: root, mode: 0644, mtime: 2000-01-01T00:00:00Z}
+      - src: NOTICE.md
+        info: {owner: root, group: root, mode: 0644, mtime: 2000-01-01T00:00:00Z}
+      - src: README.md
+        info: {owner: root, group: root, mode: 0644, mtime: 2000-01-01T00:00:00Z}
+      - src: install.sh
+        info: {owner: root, group: root, mode: 0755, mtime: 2000-01-01T00:00:00Z}
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.spdx.sbom"
+
+changelog:
+  use: git
+
+release:
+  draft: true

@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a reproducible YAMS Plus problem without private data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste credentials, API keys, provider identifiers, private addresses or indexer details.
+  - type: input
+    id: version
+    attributes:
+      label: YAMS Plus version or commit
+      placeholder: commit SHA or version
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Debian 13 amd64
+        - Ubuntu 24.04 amd64
+        - Unsupported platform
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour and reproduction
+      description: Redact secrets and private network details.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Redacted doctor output
+      description: Prefer `yamsplus doctor --json`; inspect it before submitting.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials, API keys, private addresses and indexer details.
+          required: true

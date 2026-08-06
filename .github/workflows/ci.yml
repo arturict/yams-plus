@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5'
+          cache: true
+      - run: go test -race -coverprofile=coverage.out ./...
+      - run: go vet ./...
+      - run: GOTOOLCHAIN=go1.26.5 go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      - run: GOTOOLCHAIN=go1.26.5 go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+
+  generated-stack:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5'
+      - name: Validate every downloader network shape
+        run: |
+          for config in examples/usenet.yaml examples/torrent-vpn.yaml examples/both-openvpn.yaml examples/movies-only.yaml examples/series-only.yaml; do
+            root="./.yamsplus-test/$(basename "$config" .yaml)"
+            go run ./cmd/yamsplus --root "$root" install --config "$config" --skip-start
+            docker compose --project-directory "$root/opt/yamsplus" --file "$root/opt/yamsplus/compose.yaml" config --quiet
+            test -z "$(grep -R 'image:.*latest' "$root/opt/yamsplus" || true)"
+            test -z "$(grep -E 'docker.sock|privileged:' "$root/opt/yamsplus/compose.yaml" || true)"
+          done
+
+  website:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: guide-preview
+          path: site/dist
+
+  secret-scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+
+  filesystem-scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          exit-code: 1
+          trivy-version: v0.73.0
+          skip-dirs: .yamsplus-test,site/node_modules,dist
+
+  locked-images:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.images.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: images
+        name: Read immutable images from the stack lock
+        run: |
+          matrix=$(ruby -ryaml -rjson -e 'puts({include: YAML.load_file("stack/stack.lock.yaml").fetch("services").map { |name, service| {name: name, image: service.fetch("image")} }}.to_json)')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  container-scan:
+    needs: locked-images
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.locked-images.outputs.matrix) }}
+    steps:
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          scan-ref: ${{ matrix.image }}
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          exit-code: 1
+          trivy-version: v0.73.0

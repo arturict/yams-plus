@@ -1,0 +1,51 @@
+---
+title: YAMS Plus
+description: Your Jellyfin stack, minus the afternoon of clicking through settings.
+template: splash
+hero:
+  tagline: A friendly installer for Jellyfin, Seerr and the Arr apps. You choose the modules; YAMS Plus connects them.
+  actions:
+    - text: Install the beta
+      link: /install/
+      icon: right-arrow
+      variant: primary
+    - text: See what it changes
+      link: /wizard/
+      icon: document
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## One wizard. One manual stop.
+
+YAMS Plus installs a private Jellyfin stack and configures the applications through their supported APIs. The one deliberate pause is yours: add at least one indexer you are allowed to use in Prowlarr. We do not guess credentials, choose questionable sources, or perform interpretive dance around copyright.
+
+<CardGrid>
+  <Card title="Fast by default" icon="rocket">
+    Movies, series, subtitles, 1080p profiles, app connections and Jellyfin plugins arrive configured.
+  </Card>
+  <Card title="Modular on purpose" icon="puzzle">
+    Add torrenting behind a VPN, Usenet over verified TLS, 4K movies, or Books beta only when you want them.
+  </Card>
+  <Card title="Private from boot" icon="seti:lock">
+    Ports bind only to LAN, loopback or Tailscale addresses you explicitly select. The installed stack has no telemetry.
+  </Card>
+</CardGrid>
+
+The public guide uses privacy-conscious, self-hosted Umami analytics to learn which documentation paths help people complete an install. It does not add analytics to YAMS Plus or any installed media service. [See exactly what the guide measures](/privacy/).
+
+:::note[Independent project]
+YAMS Plus is inspired by the approachable onboarding of [YAMS](https://yams.media/). It is not affiliated with YAMS and does not copy its website, screenshots or branding.
+:::
+
+## What you get
+
+- Jellyfin, Seerr and Prowlarr as the always-on core.
+- Radarr and Sonarr when movies or series are selected.
+- Recyclarr-managed TRaSH profiles, including sane fallback and upgrade rules.
+- Bazarr language profiles, SABnzbd or qBittorrent, and optional VPN kill-switching.
+- A compatible Jellyfin plugin pack, audited again after restart.
+- Encrypted backups, a stable JSON doctor report and an idempotent `apply`.
+
+Start with the [requirements](/requirements/). Five minutes of reading now can prevent an intimate late-night friendship with filesystem permissions.

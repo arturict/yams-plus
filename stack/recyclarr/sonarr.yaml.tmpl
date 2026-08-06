@@ -1,0 +1,24 @@
+sonarr:
+  yamsplus_sonarr:
+    base_url: http://sonarr:8989
+    api_key: !secret sonarr_api_key
+    delete_old_custom_formats: true
+    media_naming:
+      series: jellyfin-tvdb
+      season: default
+      episodes:
+        rename: true
+        standard: default
+        daily: default
+        anime: default
+    quality_definition:
+      type: series
+    quality_profiles:
+{{- if hasProfile .Quality.Series.Profiles "1080p" }}
+      - trash_id: 72dae194fc92bf828f32cde7744e51a1
+        name: YAMS+ 1080p
+{{- end }}
+{{- if hasProfile .Quality.Series.Profiles "2160p" }}
+      - trash_id: 9d142234e45d6143785ac55f5a9e8dc9
+        name: YAMS+ 2160p
+{{- end }}

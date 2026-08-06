@@ -1,0 +1,284 @@
+name: {{ .ProjectName }}
+
+x-common: &common
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  environment:
+    TZ: {{ quote .Timezone }}
+  networks:
+    - yamsplus
+
+x-linuxserver: &linuxserver
+  <<: *common
+  environment:
+    TZ: {{ quote .Timezone }}
+    PUID: {{ .Runtime.PUID }}
+    PGID: {{ .Runtime.PGID }}
+
+services:
+  jellyfin:
+    <<: *common
+    image: {{ image "jellyfin" }}
+    container_name: yamsplus-jellyfin
+    volumes:
+      - {{ quote (printf "%s:/config" (appPath "jellyfin")) }}
+      - {{ quote (printf "%s:/data/library" (dataPath "library")) }}
+{{- if .Runtime.HardwareAcceleration }}
+    devices:
+      - /dev/dri:/dev/dri
+{{- end }}
+    ports:
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:8096" . $.Ports.Jellyfin) }}
+      - {{ quote (printf "%s:%d:7359/udp" . $.Ports.JellyfinDiscovery) }}
+{{- end }}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8096/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  seerr:
+    <<: *common
+    image: {{ image "seerr" }}
+    container_name: yamsplus-seerr
+    init: true
+    volumes:
+      - {{ quote (printf "%s:/app/config" (appPath "seerr")) }}
+    ports:
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:5055" . $.Ports.Seerr) }}
+{{- end }}
+    depends_on:
+      jellyfin:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5055/api/v1/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  prowlarr:
+    <<: *linuxserver
+    image: {{ image "prowlarr" }}
+    container_name: yamsplus-prowlarr
+    volumes:
+      - {{ quote (printf "%s:/config" (appPath "prowlarr")) }}
+    ports:
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:9696" . $.Ports.Prowlarr) }}
+{{- end }}
+
+{{- if .Modules.Movies }}
+  radarr:
+    <<: *linuxserver
+    image: {{ image "radarr" }}
+    container_name: yamsplus-radarr
+    volumes:
+      - {{ quote (printf "%s:/config" (appPath "radarr")) }}
+      - {{ quote (printf "%s:/data" (dataPath "")) }}
+    ports:
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:7878" . $.Ports.Radarr) }}
+{{- end }}
+{{- end }}
+
+{{- if .Modules.Series }}
+  sonarr:
+    <<: *linuxserver
+    image: {{ image "sonarr" }}
+    container_name: yamsplus-sonarr
+    volumes:
+      - {{ quote (printf "%s:/config" (appPath "sonarr")) }}
+      - {{ quote (printf "%s:/data" (dataPath "")) }}
+    ports:
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:8989" . $.Ports.Sonarr) }}
+{{- end }}
+{{- end }}
+
+{{- if .Modules.Subtitles }}
+  bazarr:
+    <<: *linuxserver
+    image: {{ image "bazarr" }}
+    container_name: yamsplus-bazarr
+    volumes:
+      - {{ quote (printf "%s:/config" (appPath "bazarr")) }}
+      - {{ quote (printf "%s:/data/library" (dataPath "library")) }}
+    ports:
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:6767" . $.Ports.Bazarr) }}
+{{- end }}
+{{- end }}
+
+{{- if vpnEnabled }}
+  gluetun:
+    <<: *common
+    image: {{ image "gluetun" }}
+    container_name: yamsplus-gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TZ: {{ quote .Timezone }}
+      VPN_SERVICE_PROVIDER: {{ quote .Downloads.VPN.Provider }}
+      VPN_TYPE: {{ quote .Downloads.VPN.Type }}
+{{- if eq .Downloads.VPN.Type "wireguard" }}
+      WIREGUARD_PRIVATE_KEY_SECRETFILE: /run/secrets/wireguard_private_key
+{{- else }}
+      OPENVPN_USER_SECRETFILE: /run/secrets/openvpn_username
+      OPENVPN_PASSWORD_SECRETFILE: /run/secrets/openvpn_password
+{{- end }}
+      VPN_PORT_FORWARDING: {{ quote (yesno .Downloads.Torrent.PortForwarding) }}
+    secrets:
+{{- if eq .Downloads.VPN.Type "wireguard" }}
+      - wireguard_private_key
+{{- else }}
+      - openvpn_username
+      - openvpn_password
+{{- end }}
+    ports:
+{{- if .Downloads.Usenet.UseVPN }}
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:8080" . $.Ports.SABnzbd) }}
+{{- end }}
+{{- end }}
+{{- if and (or (eq .Downloads.Mode "torrent") (eq .Downloads.Mode "both")) .Downloads.Torrent.UseVPN }}
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:8081" . $.Ports.QBittorrent) }}
+{{- end }}
+{{- end }}
+    healthcheck:
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+{{- end }}
+
+{{- if or (eq .Downloads.Mode "usenet") (eq .Downloads.Mode "both") }}
+  sabnzbd:
+{{- if .Downloads.Usenet.UseVPN }}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    network_mode: service:gluetun
+    environment:
+      TZ: {{ quote .Timezone }}
+      PUID: {{ .Runtime.PUID }}
+      PGID: {{ .Runtime.PGID }}
+    depends_on:
+      gluetun:
+        condition: service_healthy
+{{- else }}
+    <<: *linuxserver
+{{- end }}
+    image: {{ image "sabnzbd" }}
+    container_name: yamsplus-sabnzbd
+    volumes:
+      - {{ quote (printf "%s:/config" (appPath "sabnzbd")) }}
+      - {{ quote (printf "%s:/data" (dataPath "")) }}
+{{- if not .Downloads.Usenet.UseVPN }}
+    ports:
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:8080" . $.Ports.SABnzbd) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if or (eq .Downloads.Mode "torrent") (eq .Downloads.Mode "both") }}
+{{- if .Downloads.Torrent.UseVPN }}
+  qbittorrent:
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    image: {{ image "qbittorrent" }}
+    container_name: yamsplus-qbittorrent
+    network_mode: service:gluetun
+    environment:
+      TZ: {{ quote .Timezone }}
+      PUID: {{ .Runtime.PUID }}
+      PGID: {{ .Runtime.PGID }}
+      WEBUI_PORT: 8081
+    volumes:
+      - {{ quote (printf "%s:/config" (appPath "qbittorrent")) }}
+      - {{ quote (printf "%s:/data" (dataPath "")) }}
+    depends_on:
+      gluetun:
+        condition: service_healthy
+{{- else }}
+  qbittorrent:
+    <<: *linuxserver
+    image: {{ image "qbittorrent" }}
+    container_name: yamsplus-qbittorrent
+    environment:
+      TZ: {{ quote .Timezone }}
+      PUID: {{ .Runtime.PUID }}
+      PGID: {{ .Runtime.PGID }}
+      WEBUI_PORT: 8081
+    volumes:
+      - {{ quote (printf "%s:/config" (appPath "qbittorrent")) }}
+      - {{ quote (printf "%s:/data" (dataPath "")) }}
+    ports:
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:8081" . $.Ports.QBittorrent) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if .Modules.Books }}
+  shelfmark:
+    <<: *common
+    image: {{ image "shelfmark" }}
+    container_name: yamsplus-shelfmark
+    volumes:
+      - {{ quote (printf "%s:/config" (appPath "shelfmark")) }}
+      - {{ quote (printf "%s:/data" (dataPath "")) }}
+    ports:
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:8084" . $.Ports.Shelfmark) }}
+{{- end }}
+
+  audiobookshelf:
+    <<: *common
+    image: {{ image "audiobookshelf" }}
+    container_name: yamsplus-audiobookshelf
+    user: {{ quote (printf "%d:%d" .Runtime.PUID .Runtime.PGID) }}
+    volumes:
+      - {{ quote (printf "%s:/config" (appPath "audiobookshelf/config")) }}
+      - {{ quote (printf "%s:/metadata" (appPath "audiobookshelf/metadata")) }}
+      - {{ quote (printf "%s:/audiobooks" (dataPath "library/audiobooks")) }}
+      - {{ quote (printf "%s:/ebooks" (dataPath "library/books")) }}
+    ports:
+{{- range .BindAddresses }}
+      - {{ quote (printf "%s:%d:80" . $.Ports.Audiobookshelf) }}
+{{- end }}
+{{- end }}
+
+  recyclarr:
+    <<: *common
+    image: {{ image "recyclarr" }}
+    container_name: yamsplus-recyclarr
+    profiles: ["tools"]
+    user: {{ quote (printf "%d:%d" .Runtime.PUID .Runtime.PGID) }}
+    volumes:
+      - {{ quote (printf "%s:/config" .RecyclarrDir) }}
+
+networks:
+  yamsplus:
+    name: yamsplus
+    driver: bridge
+
+{{- if vpnEnabled }}
+secrets:
+{{- if eq .Downloads.VPN.Type "wireguard" }}
+  wireguard_private_key:
+    file: {{ quote (secretPath .Downloads.VPN.PrivateKeySecret) }}
+{{- else }}
+  openvpn_username:
+    file: {{ quote (secretPath .Downloads.VPN.UsernameSecret) }}
+  openvpn_password:
+    file: {{ quote (secretPath .Downloads.VPN.PasswordSecret) }}
+{{- end }}
+{{- end }}

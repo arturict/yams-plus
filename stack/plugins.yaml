@@ -1,0 +1,27 @@
+schemaVersion: 1
+jellyfinFamily: "10.11"
+repositories:
+  - name: Jellyfin Enhanced
+    url: https://raw.githubusercontent.com/n00bcodr/jellyfin-plugins/main/10.11/manifest.json
+  - name: IAmParadox27 Plugins
+    url: https://www.iamparadox.dev/jellyfin/plugins/manifest.json
+  - name: Intro Skipper
+    url: https://intro-skipper.org/manifest.json
+  - name: EditorsChoice
+    url: https://raw.githubusercontent.com/lachlandcp/jellyfin-editors-choice-plugin/main/manifest.json
+requiredCompatible:
+  - AudioDB
+  - Custom Tabs
+  - EditorsChoice
+  - File Transformation
+  - Intro Skipper
+  - Jellyfin Enhanced
+  - MusicBrainz
+  - OMDb
+  - Playback Reporting
+  - Plugin Pages
+  - Reports
+  - Studio Images
+  - TMDb
+excluded:
+  - SSO-Auth

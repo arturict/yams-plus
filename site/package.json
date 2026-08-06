@@ -1,0 +1,23 @@
+{
+  "name": "yamsplus-guide",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro check && astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@astrojs/starlight": "0.41.6",
+    "astro": "7.1.6",
+    "sharp": "0.35.3",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.55.0"
+  }
+}

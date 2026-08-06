@@ -1,0 +1,24 @@
+schemaVersion: 1
+projectName: yamsplus
+timezone: Europe/Zurich
+adminUsername: captain
+dataRoot: /srv/yamsplus
+bindAddresses: [127.0.0.1]
+runtime: {puid: 1000, pgid: 1000, hardwareAcceleration: false}
+modules: {movies: true, series: false, subtitles: false, books: false}
+downloads:
+  mode: usenet
+  usenet: {provider: custom, host: news.example.test, port: 563, connections: 20, usernameSecret: usenet_username, passwordSecret: usenet_password, useVpn: false}
+  torrent: {useVpn: true, portForwarding: false}
+  vpn: {provider: protonvpn, type: wireguard, privateKeySecret: wireguard_private_key, usernameSecret: openvpn_username, passwordSecret: openvpn_password}
+quality:
+  movies: {profiles: [720p, 1080p, 2160p], default: 1080p, fallbackUpgrade: true}
+  series: {profiles: [1080p], default: 1080p, fallbackUpgrade: true}
+  audio: original
+  hdr: compatible
+subtitles: {languages: [en, de], forced: false, hearingImpaired: false, provider: opensubtitles.com, usernameSecret: subtitles_username, passwordSecret: subtitles_password}
+plugins:
+  requiredCompatible: [AudioDB, Custom Tabs, EditorsChoice, File Transformation, Intro Skipper, Jellyfin Enhanced, MusicBrainz, OMDb, Playback Reporting, Plugin Pages, Reports, Studio Images, TMDb]
+  excluded: [SSO-Auth]
+  playbackRetentionDays: 90
+affiliate: {enabled: false}
