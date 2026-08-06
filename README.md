@@ -1,6 +1,7 @@
 # YAMS Plus
 
 [![CI](https://github.com/arturict/yams-plus/actions/workflows/ci.yml/badge.svg)](https://github.com/arturict/yams-plus/actions/workflows/ci.yml)
+[![Container security](https://github.com/arturict/yams-plus/actions/workflows/container-security.yml/badge.svg)](https://github.com/arturict/yams-plus/actions/workflows/container-security.yml)
 [![Guide](https://img.shields.io/badge/guide-live-7c3aed)](https://yamsplus-guide.vercel.app/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 

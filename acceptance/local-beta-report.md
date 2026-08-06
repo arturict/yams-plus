@@ -1,4 +1,4 @@
-# Beta candidate evidence — 2026-08-05
+# Beta candidate evidence — 2026-08-07
 
 This report contains local implementation evidence, an isolated x1 smoke test
 and the public documentation deployment. It is not the completed authorised
@@ -47,7 +47,8 @@ scenarios remain outstanding.
 
 ## Automated gates
 
-- PASS: `go test ./...`, `go vet ./...`, Staticcheck v0.7.0.
+- PASS: `go test -race ./...`, `go vet ./...`, Staticcheck v0.7.0 on the
+  public Ubuntu 24.04 GitHub Actions runner.
 - PASS: govulncheck v1.6.0 with Go 1.26.5, zero reachable vulnerabilities.
 - PASS: npm audit, Astro check/build and 10 Playwright accessibility/smoke tests.
 - PASS: Gitleaks with runtime test data excluded by the checked-in policy.
@@ -57,8 +58,11 @@ scenarios remain outstanding.
   Two clean builds produced the identical archive SHA-256
   `5fe0a278a2da02aa30320cbfd436b74d0cd7060c852963893d4a84b677dfdf9b`;
   archive ownership, permissions and timestamps are deterministic.
-- NOT RUN LOCALLY: Go race detector. The Windows host has no C toolchain; the
-  immutable Linux CI workflow retains the race gate.
+- PASS: the public CI workflow independently validated all five downloader
+  shapes, the image-lock matrix, the guide, Gitleaks and the High/Critical
+  filesystem scan. Container-image findings remain isolated in the separate,
+  still-blocking Container security workflow rather than being hidden behind a
+  green code-quality badge.
 - NOT APPLICABLE YET: GoReleaser's SCM-aware `check` cannot resolve release
   refs because this local repository has neither a first commit nor a remote.
   The complete snapshot build, tests, archive, SBOM and checksums pass.
@@ -71,7 +75,9 @@ scenarios remain outstanding.
 
 - The English Astro/Starlight guide is live at
   `https://yamsplus-guide.vercel.app`. Vercel reported production deployment
-  `dpl_3Brb49T1mYAZkX6CxJMjGiVMkyhd` as `READY` on 2026-08-06.
+  `dpl_DNu1gJEpj7aMTAN43uk1Qdj9zmGZ` as `READY` and promoted it on 2026-08-07.
+  The deployed canonical/OpenGraph URL, public GitHub link and source-install
+  command were checked before promotion.
 - The initial no-`--prod` deployment was nevertheless assigned Vercel's
   production target and stable `vercel.app` alias for the new project. No
   custom domain was attached and no domain was purchased.
@@ -165,6 +171,6 @@ assessed and resolved.
   production project still has zero running containers and its configuration
   hashes are unchanged.
 - No media was requested or downloaded: Seerr requests, SABnzbd queue, download
-  files and library files were all zero. No code was pushed, no CLI release was
-  published, and no custom domain was registered or activated. Only the guide
-  deployment described above is public.
+  files and library files were all zero. The GPL-3.0 source is public at
+  `https://github.com/arturict/yams-plus`; no tagged CLI release was published
+  and no custom domain was registered or activated.

@@ -80,33 +80,5 @@ jobs:
           scanners: vuln,misconfig,secret
           severity: HIGH,CRITICAL
           exit-code: 1
-          trivy-version: v0.73.0
+          version: v0.73.0
           skip-dirs: .yamsplus-test,site/node_modules,dist
-
-  locked-images:
-    runs-on: ubuntu-24.04
-    outputs:
-      matrix: ${{ steps.images.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - id: images
-        name: Read immutable images from the stack lock
-        run: |
-          matrix=$(ruby -ryaml -rjson -e 'lock = YAML.safe_load_file("stack/stack.lock.yaml", permitted_classes: [Time]); puts({include: lock.fetch("services").map { |name, service| {name: name, image: service.fetch("image")} }}.to_json)')
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-
-  container-scan:
-    needs: locked-images
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.locked-images.outputs.matrix) }}
-    steps:
-      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          scan-ref: ${{ matrix.image }}
-          scanners: vuln,secret
-          severity: HIGH,CRITICAL
-          exit-code: 1
-          trivy-version: v0.73.0
