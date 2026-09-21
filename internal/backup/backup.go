@@ -106,7 +106,11 @@ func Restore(paths layout.Layout, source, passphrase string) error {
 			if err := os.MkdirAll(filepath.Dir(resolved), 0o750); err != nil {
 				return err
 			}
-			out, err := os.OpenFile(resolved, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(header.Mode))
+			// O_NOFOLLOW so a symlink already sitting at this path cannot
+			// redirect a root-owned write somewhere else. The application
+			// containers can create entries under the state directory, so the
+			// destination is not fully trusted even though the archive is.
+			out, err := os.OpenFile(resolved, os.O_CREATE|os.O_TRUNC|os.O_WRONLY|openNoFollow, os.FileMode(header.Mode))
 			if err != nil {
 				return err
 			}

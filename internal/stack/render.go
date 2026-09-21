@@ -325,11 +325,20 @@ func EnsureRuntimeOwnership(cfg config.Config, paths layout.Layout) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	return filepath.Walk(paths.RecyclarrDir(), func(path string, _ os.FileInfo, err error) error {
+	return filepath.Walk(paths.RecyclarrDir(), func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if err := os.Chown(path, cfg.Runtime.PUID, cfg.Runtime.PGID); err != nil {
+		// This tree is bind-mounted into the Recyclarr container, which runs as
+		// PUID and can therefore create entries in it. os.Chown resolves a
+		// symlink and changes its target, so a planted link would hand a
+		// root-owned file such as /etc/shadow to PUID on the next apply.
+		// os.Lchown acts on the link itself, and a symlink here is never
+		// legitimate, so refuse it outright.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to converge ownership through symlink %s", path)
+		}
+		if err := os.Lchown(path, cfg.Runtime.PUID, cfg.Runtime.PGID); err != nil {
 			return fmt.Errorf("set ownership on %s: %w", path, err)
 		}
 		return nil

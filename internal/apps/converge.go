@@ -364,13 +364,42 @@ func (c Converger) writeRecyclarrSecrets(arrs map[string]*arrState) error {
 		return err
 	}
 	path := filepath.Join(c.Paths.RecyclarrDir(), "secrets.yml")
-	if err := os.WriteFile(path, []byte(out.String()), 0o600); err != nil {
+	// This directory is bind-mounted into the Recyclarr container as /config,
+	// which runs as PUID. os.WriteFile follows a symlink, so replacing this
+	// file with a link to a root-owned path would have had apply truncate and
+	// rewrite that path as root. Writing a fresh temp file and renaming over
+	// the entry replaces a link instead of following it.
+	tmp, err := os.CreateTemp(c.Paths.RecyclarrDir(), ".secrets-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = tmp.Close(); _ = os.Remove(tmpName) }
+	if err := tmp.Chmod(0o600); err != nil {
+		cleanup()
+		return err
+	}
+	if _, err := tmp.WriteString(out.String()); err != nil {
+		cleanup()
 		return err
 	}
 	if runtime.GOOS != "windows" {
-		if err := os.Chown(path, c.Config.Runtime.PUID, c.Config.Runtime.PGID); err != nil {
+		if err := tmp.Chown(c.Config.Runtime.PUID, c.Config.Runtime.PGID); err != nil {
+			cleanup()
 			return fmt.Errorf("set ownership on %s: %w", path, err)
 		}
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
 	}
 	return nil
 }
