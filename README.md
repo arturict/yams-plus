@@ -19,10 +19,12 @@ least one indexer you are allowed to use in Prowlarr.
 
 This repository is public so the implementation can be inspected, tested and
 improved in the open. It is an early beta, not a signed production release.
-Configuration convergence and a credential-free Ubuntu smoke test have passed;
-the real authorised media-download flow and several UI-level plugin checks are
+Configuration convergence, an idempotent second apply, encrypted backup and
+restore, restart survival and a credential-free Ubuntu install have passed; the
+real authorised media-download flow and several UI-level plugin checks are
 still outstanding. The current evidence and known limits are recorded in the
-[beta report](acceptance/local-beta-report.md).
+[beta report](acceptance/local-beta-report.md), including a container scan that
+is not green.
 
 The installed stack has no telemetry. The separately deployed documentation
 uses privacy-conscious, self-hosted Umami analytics as described in the
