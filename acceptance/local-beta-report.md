@@ -81,7 +81,8 @@ scenarios remain outstanding.
 - The initial no-`--prod` deployment was nevertheless assigned Vercel's
   production target and stable `vercel.app` alias for the new project. No
   custom domain was attached and no domain was purchased.
-- All nine guide routes returned HTTP 200, the deliberate missing route
+- All guide routes returned HTTP 200 (nine documentation pages plus the
+  landing page), the deliberate missing route
   returned 404, the sitemap contains no `example.invalid` URLs, and 14 local
   Playwright link, navigation, accessibility and analytics tests passed
   against the production build before deployment.
