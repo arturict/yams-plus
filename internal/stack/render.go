@@ -94,6 +94,10 @@ func Render(cfg config.Config, paths layout.Layout) ([]RenderedFile, error) {
 			return "off"
 		},
 		"hasProfile": func(values []string, value string) bool { return slices.Contains(values, value) },
+		// Only the profiles the templates actually create may be referenced.
+		// Scoring a custom format against "YAMS+ 720p" made Recyclarr warn and
+		// drop the assignment, because no 720p profile is ever created.
+		"renderedProfiles": func(values []string) []string { return config.RenderedProfiles(values) },
 		"vpnEnabled": func() bool {
 			return cfg.Downloads.Usenet.UseVPN || ((cfg.Downloads.Mode == "torrent" || cfg.Downloads.Mode == "both") && cfg.Downloads.Torrent.UseVPN)
 		},

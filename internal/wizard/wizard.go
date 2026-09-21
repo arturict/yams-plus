@@ -189,7 +189,7 @@ func (w Wizard) Run() (Result, error) {
 
 func (w Wizard) mediaQuality(label string, advanced4K bool) (config.MediaQuality, error) {
 	profiles := []string{}
-	sevenTwenty, err := w.yesNo("Support 720p "+label+" releases", false)
+	sevenTwenty, err := w.yesNo("Accept 720p "+label+" releases as a fallback below 1080p", false)
 	if err != nil {
 		return config.MediaQuality{}, err
 	}
@@ -216,6 +216,9 @@ func (w Wizard) mediaQuality(label string, advanced4K bool) (config.MediaQuality
 	}
 	if len(profiles) == 0 {
 		return config.MediaQuality{}, fmt.Errorf("select at least one %s quality", label)
+	}
+	if len(config.RenderedProfiles(profiles)) == 0 {
+		return config.MediaQuality{}, fmt.Errorf("select 1080p or 4K %s: 720p is only a fallback tier of the 1080p profile", label)
 	}
 	defaultProfile := profiles[0]
 	for _, profile := range profiles {

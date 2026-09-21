@@ -23,7 +23,7 @@ radarr:
       - trash_ids:
           - 923b6abef9b17f937fab56cfcf89e1f1 # DV without HDR fallback
         assign_scores_to:
-{{- range .Quality.Movies.Profiles }}
+{{- range renderedProfiles .Quality.Movies.Profiles }}
           - name: YAMS+ {{ . }}
             score: -10000
 {{- end }}

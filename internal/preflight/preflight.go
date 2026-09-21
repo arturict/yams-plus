@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/arturict/yams-plus/internal/config"
 )
 
 type Check struct {
@@ -62,7 +64,7 @@ func Run(ctx context.Context, production bool, bindAddresses []string, portBindi
 		status := "healthy"
 		message := "private bind address"
 		ip := net.ParseIP(address)
-		if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate() && !strings.HasPrefix(address, "100.")) {
+		if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate() && !config.IsTailscale(ip)) {
 			status, message = "failed", "public or invalid address"
 		}
 		checks = append(checks, Check{Name: "bind-" + address, Status: status, Message: message})

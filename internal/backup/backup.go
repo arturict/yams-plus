@@ -93,7 +93,7 @@ func Restore(paths layout.Layout, source, passphrase string) error {
 		if err != nil {
 			return err
 		}
-		resolved, err := safeTarget(root, header.Name)
+		resolved, err := safeTarget(paths, root, header.Name)
 		if err != nil {
 			return err
 		}
@@ -124,22 +124,26 @@ func Restore(paths layout.Layout, source, passphrase string) error {
 	return nil
 }
 
-// safeTarget resolves an archive entry below the install root and rejects
-// traversal. The production root is "/", where the separator must not be
-// appended twice or every legitimate entry is refused.
-func safeTarget(root, name string) (string, error) {
+// safeTarget resolves an archive entry and confines it to one of the three
+// directories Create archives. Confining to the install root alone is not
+// enough: the production root is "/", under which every absolute path
+// qualifies, so a tampered archive could write /root/.ssh/authorized_keys or
+// /etc/cron.d as root. Restoring only ever needs the managed trees.
+func safeTarget(paths layout.Layout, root, name string) (string, error) {
 	resolved, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(name)))
 	if err != nil {
 		return "", fmt.Errorf("unsafe backup path %q", name)
 	}
-	prefix := root
-	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
-		prefix += string(filepath.Separator)
+	for _, managed := range []string{paths.ConfigDir(), paths.StateDir(), paths.InstallDir()} {
+		abs, err := filepath.Abs(managed)
+		if err != nil {
+			continue
+		}
+		if resolved == abs || strings.HasPrefix(resolved, abs+string(filepath.Separator)) {
+			return resolved, nil
+		}
 	}
-	if resolved == root || !strings.HasPrefix(resolved, prefix) {
-		return "", fmt.Errorf("unsafe backup path %q", name)
-	}
-	return resolved, nil
+	return "", fmt.Errorf("unsafe backup path %q", name)
 }
 
 func addTree(writer *tar.Writer, archiveRoot, source string, includeSecrets bool, secretsDir string) error {

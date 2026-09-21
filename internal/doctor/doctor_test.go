@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/arturict/yams-plus/internal/config"
@@ -71,5 +72,32 @@ func TestChecksReportMissingBindAddress(t *testing.T) {
 	check := prowlarrIndexerCheck(context.Background(), cfg, secrets.Store{Dir: t.TempDir()})
 	if check.Status != "failed" {
 		t.Fatalf("check=%#v", check)
+	}
+}
+
+// doctor --json is consumed by scripts, so the check list must not depend on
+// Go map iteration order.
+func TestEndpointChecksAreOrderedDeterministically(t *testing.T) {
+	cfg := config.Default()
+	cfg.Modules.Books = true
+	cfg.Downloads.Mode = "both"
+	first := endpointChecks(context.Background(), cfg)
+	if len(first) < 2 {
+		t.Fatalf("expected several endpoint checks, got %d", len(first))
+	}
+	names := make([]string, len(first))
+	for i, check := range first {
+		names[i] = check.Name
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Fatalf("checks are not in a stable sorted order: %v", names)
+	}
+	for i := 0; i < 8; i++ {
+		again := endpointChecks(context.Background(), cfg)
+		for j := range again {
+			if again[j].Name != names[j] {
+				t.Fatalf("run %d produced %v, want %v", i, again, names)
+			}
+		}
 	}
 }

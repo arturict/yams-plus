@@ -30,30 +30,53 @@ func TestEncryptedRoundTrip(t *testing.T) {
 	}
 }
 
-// Restore resolves archive entries below the install root, including the
-// production root "/", and rejects traversal.
+// Restore accepts the three managed trees, including under the production root
+// "/", and refuses everything else. Confining to the root alone is vacuous at
+// "/", so these cases are what actually stops a tampered archive.
 func TestSafeTarget(t *testing.T) {
 	// Restore always resolves the root first; on Windows that is the volume root.
 	root, err := filepath.Abs(string(filepath.Separator))
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := safeTarget(root, "etc/yamsplus/yamsplus.yaml")
-	if err != nil {
-		t.Fatalf("production root rejected a managed path: %v", err)
-	}
-	if want := filepath.Join(root, "etc", "yamsplus", "yamsplus.yaml"); resolved != want {
-		t.Fatalf("resolved = %q, want %q", resolved, want)
-	}
-	if _, err := safeTarget(root, "."); err == nil {
-		t.Fatal("an entry resolving to the root itself must be refused")
+	paths := layout.New(root)
+
+	for _, name := range []string{
+		"etc/yamsplus/yamsplus.yaml",
+		"etc/yamsplus/secrets/radarr_api_key",
+		"var/lib/yamsplus/state.json",
+		"opt/yamsplus/compose.yaml",
+	} {
+		resolved, err := safeTarget(paths, root, name)
+		if err != nil {
+			t.Fatalf("managed path %q rejected under the production root: %v", name, err)
+		}
+		if want := filepath.Join(root, filepath.FromSlash(name)); resolved != want {
+			t.Fatalf("resolved = %q, want %q", resolved, want)
+		}
 	}
 
-	nested := filepath.Join(root, "srv", "yamsplus")
-	if _, err := safeTarget(nested, "etc/yamsplus.yaml"); err != nil {
+	// Everything outside the managed trees must be refused even though it is
+	// trivially "below" the production root.
+	for _, name := range []string{
+		".",
+		"../root/.ssh/authorized_keys",
+		"../../../etc/cron.d/yams",
+		"etc/shadow",
+		"etc/yamsplus-not-ours/file",
+		"usr/local/bin/yamsplus",
+	} {
+		if _, err := safeTarget(paths, root, name); err == nil {
+			t.Fatalf("entry %q must be refused under the production root", name)
+		}
+	}
+
+	// The same holds for a nested test root.
+	nested := layout.New(filepath.Join(root, "srv", "sandbox"))
+	if _, err := safeTarget(nested, nested.Root, "etc/yamsplus/yamsplus.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := safeTarget(nested, "../../etc/shadow"); err == nil {
+	if _, err := safeTarget(nested, nested.Root, "../../etc/shadow"); err == nil {
 		t.Fatal("traversal outside the root must be refused")
 	}
 }

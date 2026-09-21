@@ -35,7 +35,8 @@ uses privacy-conscious, self-hosted Umami analytics as described in the
   and Audiobookshelf modules.
 - App authentication, root folders, download clients, naming, libraries and
   private LAN, loopback or Tailscale port bindings.
-- Recyclarr-managed TRaSH profiles for selected 720p, 1080p and 4K shapes.
+- Recyclarr-managed TRaSH profiles for the selected 1080p and 4K shapes, with
+  720p available as a fallback tier the 1080p profile upgrades away from.
 - A compatible Jellyfin plugin pack with repeatable installation and auditing.
 - Stable `plan`, `doctor --json`, encrypted backup and idempotent `apply`
   workflows.

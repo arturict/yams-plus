@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -151,7 +152,15 @@ func endpointChecks(ctx context.Context, cfg config.Config) []Check {
 	}
 	client := &http.Client{Timeout: 3 * time.Second}
 	var checks []Check
-	for name, port := range targets {
+	// Ranging over the map directly made doctor --json emit its checks in a
+	// different order on every run, which no consumer can diff.
+	names := make([]string, 0, len(targets))
+	for name := range targets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		port := targets[name]
 		url := fmt.Sprintf("http://%s:%d", host, port)
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		resp, err := client.Do(req)

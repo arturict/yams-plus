@@ -60,3 +60,63 @@ func TestLocalHost(t *testing.T) {
 		t.Fatalf("host=%q err=%v, want the Tailscale address unchanged", host, err)
 	}
 }
+
+// The guard exists to keep the stack off the public internet. Matching the
+// "100." prefix accepted publicly routed addresses such as Amazon's
+// 100.24.0.0/13; only Tailscale's 100.64.0.0/10 may pass.
+func TestRejectsPublic100Addresses(t *testing.T) {
+	base := func() Config {
+		cfg := Default()
+		cfg.AdminUsername = "admin"
+		cfg.Downloads.Usenet.Host = "news.example.test"
+		return cfg
+	}
+	for _, addr := range []string{"100.24.5.6", "100.200.1.1", "100.63.255.255", "100.128.0.1"} {
+		cfg := base()
+		cfg.BindAddresses = []string{addr}
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("public address %q was accepted as a Tailscale address", addr)
+		}
+	}
+	for _, addr := range []string{"100.64.0.1", "100.101.102.103", "100.127.255.255"} {
+		cfg := base()
+		cfg.BindAddresses = []string{addr}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Tailscale address %q was rejected: %v", addr, err)
+		}
+	}
+}
+
+// 720p is offered by the wizard and selected by three shipped examples, but the
+// Recyclarr templates create no 720p profile. Selecting it alongside a real
+// profile is fine; selecting it alone silently produced an empty profile list.
+func TestSevenTwentyIsAFallbackTierNotAProfile(t *testing.T) {
+	base := func() Config {
+		cfg := Default()
+		cfg.AdminUsername = "admin"
+		cfg.Downloads.Usenet.Host = "news.example.test"
+		return cfg
+	}
+	cfg := base()
+	cfg.Quality.Movies = MediaQuality{Profiles: []string{"720p"}, DefaultProfile: "720p"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("a 720p-only movie selection creates no Recyclarr profile and must be rejected")
+	}
+	cfg = base()
+	cfg.Modules.Series = true
+	cfg.Quality.Series = MediaQuality{Profiles: []string{"720p"}, DefaultProfile: "720p"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("a 720p-only series selection must be rejected")
+	}
+	cfg = base()
+	cfg.Quality.Movies = MediaQuality{Profiles: []string{"720p", "1080p"}, DefaultProfile: "1080p"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("720p alongside 1080p must stay valid: %v", err)
+	}
+	if got := RenderedProfiles([]string{"720p", "1080p", "2160p"}); len(got) != 2 || got[0] != "1080p" || got[1] != "2160p" {
+		t.Fatalf("RenderedProfiles = %v, want the two profiles the templates create", got)
+	}
+	if got := RenderedProfiles([]string{"720p"}); len(got) != 0 {
+		t.Fatalf("RenderedProfiles = %v, want none", got)
+	}
+}

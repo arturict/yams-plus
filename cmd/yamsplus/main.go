@@ -58,7 +58,9 @@ func run(args []string) error {
 	case "apply":
 		return apply(ctx, paths, args[1:])
 	case "status":
-		return runDoctor(ctx, paths, false, false)
+		// The human summary of the same checks doctor runs; skipping Docker here
+		// reported "healthy" with every container dead.
+		return runDoctor(ctx, paths, false, true)
 	case "doctor":
 		fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 		asJSON := fs.Bool("json", false, "machine-readable output")
