@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,5 +135,77 @@ func TestSafeRemoveDeletesInsideRootOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(sibling); err != nil {
 		t.Fatalf("a refused target was removed anyway: %v", err)
+	}
+}
+
+// uninstall --remove-media is refused in the beta. It has to refuse before
+// running compose down, or the host is left with no containers and a full
+// configuration directory.
+func TestUninstallRefusesRemoveMediaBeforeTouchingAnything(t *testing.T) {
+	root := t.TempDir()
+	paths := layout.New(root)
+	if err := os.MkdirAll(paths.ConfigDir(), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(paths.ConfigDir(), "yamsplus.yaml")
+	if err := os.WriteFile(marker, []byte("schemaVersion: 1\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// No compose file exists, so a run that reached compose down would fail with
+	// a docker error rather than the refusal below.
+	err := run([]string{"--root", root, "uninstall", "--yes", "--remove-media"})
+	if err == nil || !strings.Contains(err.Error(), "media deletion requires") {
+		t.Fatalf("err = %v, want the media-deletion refusal", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("configuration was touched despite the refusal: %v", err)
+	}
+}
+
+// update must re-render from the lock embedded in the running binary. Pulling
+// against the compose file already on disk re-pulled the previous binary's
+// digests and updated nothing, while the operations guide says update uses the
+// reviewed stack.lock.yaml.
+func TestUpdateRewritesComposeFromTheEmbeddedLock(t *testing.T) {
+	root := t.TempDir()
+	paths := layout.New(root)
+	configPath := filepath.Join(t.TempDir(), "desired.yaml")
+	cfg := config.Default()
+	cfg.AdminUsername = "captain"
+	cfg.Downloads.Usenet.Host = "news.example.test"
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"--root", root, "install", "--config", configPath, "--skip-start"}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.ReadFile(paths.ComposeFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Stand in for a host installed by an older binary: rewind the rendered
+	// compose file so it no longer matches the embedded lock.
+	stale := bytes.Replace(current, []byte("image: "), []byte("image: stale-"), 1)
+	if bytes.Equal(stale, current) {
+		t.Fatal("could not construct a stale compose file")
+	}
+	if err := os.WriteFile(paths.ComposeFile(), stale, 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stop the command at the Docker boundary: the file phase is what this test
+	// covers, and a real "compose up" would start the whole stack.
+	t.Setenv("PATH", "")
+	if err := run([]string{"--root", root, "update", "--yes"}); err == nil {
+		t.Fatal("expected update to fail once it reaches Docker")
+	}
+
+	after, err := os.ReadFile(paths.ComposeFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, current) {
+		t.Fatal("update did not restore the compose file from the embedded lock")
 	}
 }

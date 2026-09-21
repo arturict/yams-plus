@@ -148,6 +148,35 @@ func Render(cfg config.Config, paths layout.Layout) ([]RenderedFile, error) {
 	return files, nil
 }
 
+// conditionalPaths are generated files that exist only while their module is
+// enabled. Disabling a module has to remove them, or Recyclarr keeps syncing a
+// profile to an application the stack no longer runs.
+func conditionalPaths(paths layout.Layout) []string {
+	return []string{
+		filepath.Join(paths.RecyclarrDir(), "configs", "radarr.yaml"),
+		filepath.Join(paths.RecyclarrDir(), "configs", "sonarr.yaml"),
+	}
+}
+
+// Stale returns generated files present on disk that the desired state no
+// longer contains.
+func Stale(paths layout.Layout, files []RenderedFile) []string {
+	desired := make(map[string]bool, len(files))
+	for _, file := range files {
+		desired[file.Path] = true
+	}
+	var stale []string
+	for _, path := range conditionalPaths(paths) {
+		if desired[path] {
+			continue
+		}
+		if _, err := os.Stat(path); err == nil {
+			stale = append(stale, path)
+		}
+	}
+	return stale
+}
+
 func Plan(files []RenderedFile) ([]Change, error) {
 	changes := make([]Change, 0, len(files))
 	for _, file := range files {
@@ -167,6 +196,16 @@ func Plan(files []RenderedFile) ([]Change, error) {
 		changes = append(changes, change)
 	}
 	return changes, nil
+}
+
+// Remove deletes generated files that left the desired state.
+func Remove(stale []string) error {
+	for _, path := range stale {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 func Write(files []RenderedFile) error {

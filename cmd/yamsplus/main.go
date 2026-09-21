@@ -20,6 +20,7 @@ import (
 	"github.com/arturict/yams-plus/internal/engine"
 	"github.com/arturict/yams-plus/internal/layout"
 	"github.com/arturict/yams-plus/internal/secrets"
+	"github.com/arturict/yams-plus/internal/stack"
 	"github.com/arturict/yams-plus/internal/wizard"
 	"golang.org/x/term"
 )
@@ -376,6 +377,35 @@ func updateCommand(ctx context.Context, paths layout.Layout, args []string) erro
 	if !*yes {
 		return errors.New("update requires --yes after reviewing stack.lock.yaml")
 	}
+	// The lock is embedded in the binary, so a newer binary carries newer
+	// digests. Pulling against the compose file already on disk would pull the
+	// digests the previous binary wrote and update nothing, even though the
+	// operations guide says update uses the reviewed stack.lock.yaml.
+	cfg, err := config.Load(paths.ConfigFile())
+	if err != nil {
+		return err
+	}
+	files, err := stack.Render(cfg, paths)
+	if err != nil {
+		return err
+	}
+	changes, err := stack.Plan(files)
+	if err != nil {
+		return err
+	}
+	stale := stack.Stale(paths, files)
+	for _, path := range stale {
+		changes = append(changes, stack.Change{Path: path, Action: "delete"})
+	}
+	for _, change := range changes {
+		fmt.Printf("%-10s %s\n", change.Action, change.Path)
+	}
+	if err := stack.Write(files); err != nil {
+		return err
+	}
+	if err := stack.Remove(stale); err != nil {
+		return err
+	}
 	if err := composeOutput(ctx, paths, "pull"); err != nil {
 		return err
 	}
@@ -392,11 +422,13 @@ func uninstallCommand(ctx context.Context, paths layout.Layout, args []string) e
 	if !*yes {
 		return errors.New("uninstall requires --yes")
 	}
-	if err := composeClient(paths).Down(ctx); err != nil {
-		return err
-	}
+	// Refuse before touching anything. Tearing the stack down first and then
+	// declining left the host with no containers and a full configuration.
 	if *removeMedia {
 		return errors.New("media deletion requires the interactive safety workflow and is intentionally unavailable in the beta CLI")
+	}
+	if err := composeClient(paths).Down(ctx); err != nil {
+		return err
 	}
 	for _, target := range []string{paths.ConfigDir(), paths.StateDir(), paths.InstallDir()} {
 		if err := safeRemove(paths.Root, target); err != nil {
