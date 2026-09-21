@@ -49,3 +49,50 @@ func TestQBittorrentConvergeIsUpsertSafe(t *testing.T) {
 		t.Fatalf("created=%d edited=%d", created, edited)
 	}
 }
+
+// A credential-free re-apply must not clear the WebUI password. Convergence
+// used to send web_ui_password:"" whenever apply had no admin password, which
+// left qBittorrent open while doctor stayed green.
+func TestQBittorrentConvergeOmitsCredentialsWhenPasswordUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		password string
+		wantKeys bool
+	}{
+		{"unknown password leaves credentials alone", "", false},
+		{"known password asserts credentials", "s3cret", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var prefs map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v2/app/setPreferences":
+					_ = r.ParseForm()
+					if err := json.Unmarshal([]byte(r.Form.Get("json")), &prefs); err != nil {
+						t.Fatal(err)
+					}
+				case "/api/v2/torrents/categories":
+					_, _ = w.Write([]byte(`{}`))
+				}
+			}))
+			defer server.Close()
+
+			api := NewHTTPClient(server.URL)
+			if err := (QBittorrent{API: api}).Converge(context.Background(), "captain", tc.password); err != nil {
+				t.Fatal(err)
+			}
+			_, hasUser := prefs["web_ui_username"]
+			_, hasPass := prefs["web_ui_password"]
+			if hasUser != tc.wantKeys || hasPass != tc.wantKeys {
+				t.Fatalf("web_ui_username=%v web_ui_password=%v, want both %v", hasUser, hasPass, tc.wantKeys)
+			}
+			if tc.wantKeys && prefs["web_ui_password"] != tc.password {
+				t.Fatalf("password = %v, want %q", prefs["web_ui_password"], tc.password)
+			}
+			// The non-credential preferences are always asserted.
+			if prefs["web_ui_csrf_protection_enabled"] != true {
+				t.Fatalf("csrf protection was not set: %v", prefs)
+			}
+		})
+	}
+}

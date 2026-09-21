@@ -185,6 +185,21 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 			}
 		}
 		if qbitHost != "" {
+			// EnsureDownloadClient rebuilds the body from the schema, so every
+			// field it does not set falls back to a schema default. With an
+			// unknown admin password that wrote an empty qBittorrent password
+			// into the arr, breaking the download client it had configured.
+			if c.AdminPassword == "" {
+				configured, err := arr.client.HasDownloadClient(ctx, "YAMS+ qBittorrent")
+				if err != nil {
+					return result, err
+				}
+				if configured {
+					out("Leaving the existing %s qBittorrent download client untouched; no admin password was supplied.\n", arr.client.Name)
+					continue
+				}
+				return result, fmt.Errorf("configuring the %s qBittorrent download client needs the admin password; rerun with YAMSPLUS_ADMIN_PASSWORD set", arr.client.Name)
+			}
 			spec := DownloadClientSpec{Name: "YAMS+ qBittorrent", Implementation: "QBittorrent", Protocol: "torrent", Priority: 2, Fields: map[string]any{"host": qbitHost, "port": 8081, "useSsl": false, "username": c.Config.AdminUsername, "password": c.AdminPassword, categoryField: category}}
 			if err := arr.client.EnsureDownloadClient(ctx, spec); err != nil {
 				return result, err

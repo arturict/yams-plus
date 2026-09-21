@@ -46,9 +46,6 @@ func (b Bazarr) Converge(ctx context.Context, cfg config.Config, password, sonar
 		return err
 	}
 	values := url.Values{
-		"settings-auth-type":                     {"form"},
-		"settings-auth-username":                 {cfg.AdminUsername},
-		"settings-auth-password":                 {password},
 		"settings-general-use_sonarr":            {boolString(cfg.Modules.Series)},
 		"settings-general-use_radarr":            {boolString(cfg.Modules.Movies)},
 		"settings-general-serie_default_enabled": {boolString(cfg.Modules.Series)},
@@ -57,6 +54,15 @@ func (b Bazarr) Converge(ctx context.Context, cfg config.Config, password, sonar
 		"settings-general-movie_default_profile": {"1"},
 		"settings-general-enabled_providers":     {cfg.Subtitles.Provider},
 		"settings-general-chmod":                 {"0660"},
+	}
+	// A re-apply that was not given the admin password must leave the existing
+	// credentials alone. Sending an empty password reset Bazarr's form auth to
+	// no password at all, and doctor stayed green because the endpoint answers
+	// either way.
+	if password != "" {
+		values.Set("settings-auth-type", "form")
+		values.Set("settings-auth-username", cfg.AdminUsername)
+		values.Set("settings-auth-password", password)
 	}
 	if cfg.Modules.Series {
 		values.Set("settings-sonarr-ip", "sonarr")

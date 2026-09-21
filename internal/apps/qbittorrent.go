@@ -52,8 +52,6 @@ func (q QBittorrent) Converge(ctx context.Context, username, password string) er
 		"temp_path":                              "/data/downloads/torrents/incomplete",
 		"temp_path_enabled":                      true,
 		"create_subfolder_enabled":               true,
-		"web_ui_username":                        username,
-		"web_ui_password":                        password,
 		"web_ui_csrf_protection_enabled":         true,
 		"web_ui_clickjacking_protection_enabled": true,
 		"web_ui_host_header_validation_enabled":  false,
@@ -62,6 +60,13 @@ func (q QBittorrent) Converge(ctx context.Context, username, password string) er
 		"dht":                                    true,
 		"pex":                                    true,
 		"lsd":                                    false,
+	}
+	// Only assert the WebUI credentials when the password is actually known.
+	// A credential-free re-apply used to send an empty password, which cleared
+	// the qBittorrent WebUI password entirely.
+	if password != "" {
+		prefs["web_ui_username"] = username
+		prefs["web_ui_password"] = password
 	}
 	raw, err := json.Marshal(prefs)
 	if err != nil {

@@ -87,6 +87,22 @@ type DownloadClientSpec struct {
 	Fields         map[string]any
 }
 
+// HasDownloadClient reports whether a download client of this name already
+// exists, so a re-apply can decline to rebuild one whose credentials it does
+// not know rather than overwrite them with schema defaults.
+func (s Servarr) HasDownloadClient(ctx context.Context, name string) (bool, error) {
+	var existing []map[string]any
+	if err := s.API.DoJSON(ctx, http.MethodGet, s.prefix()+"/downloadclient", nil, &existing); err != nil {
+		return false, err
+	}
+	for _, item := range existing {
+		if strings.EqualFold(fmt.Sprint(item["name"]), name) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s Servarr) EnsureDownloadClient(ctx context.Context, wanted DownloadClientSpec) error {
 	base := s.prefix() + "/downloadclient"
 	var schemas []map[string]any
