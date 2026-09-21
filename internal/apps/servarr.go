@@ -48,6 +48,22 @@ func (s Servarr) Authenticate(apiKey string) { s.API.Headers.Set("X-Api-Key", ap
 
 func (s Servarr) Wait(ctx context.Context) error { return s.API.Wait(ctx, "/ping", 5*time.Minute) }
 
+// EnsureAnalyticsDisabled turns off the anonymous usage and error reporting the
+// arr applications enable by default. The README promises the installed stack
+// carries no telemetry, and nothing was switching this off.
+func (s Servarr) EnsureAnalyticsDisabled(ctx context.Context) error {
+	path := s.prefix() + "/config/host"
+	var current map[string]any
+	if err := s.API.DoJSON(ctx, http.MethodGet, path, nil, &current); err != nil {
+		return err
+	}
+	if enabled, ok := current["analyticsEnabled"].(bool); ok && !enabled {
+		return nil
+	}
+	current["analyticsEnabled"] = false
+	return s.API.DoJSON(ctx, http.MethodPut, path, current, &current)
+}
+
 func (s Servarr) EnsureHostAuth(ctx context.Context, username, password string) error {
 	if password == "" {
 		return nil

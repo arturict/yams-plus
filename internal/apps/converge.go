@@ -76,6 +76,9 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 		if err := client.EnsureHostAuth(ctx, c.Config.AdminUsername, c.AdminPassword); err != nil {
 			return err
 		}
+		if err := client.EnsureAnalyticsDisabled(ctx); err != nil {
+			return err
+		}
 		if root != "" {
 			if err := client.EnsureRootFolder(ctx, root); err != nil {
 				return err
