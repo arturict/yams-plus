@@ -54,7 +54,9 @@ func (c Client) Logs(ctx context.Context, service string) (string, error) {
 }
 
 func (c Client) PS(ctx context.Context) ([]Container, error) {
-	out, err := c.Run(ctx, "ps", "--format", "json")
+	// Without --all, compose lists only running containers, so a crashed
+	// service silently disappeared from the doctor report instead of failing.
+	out, err := c.Run(ctx, "ps", "--all", "--format", "json")
 	if err != nil {
 		return nil, err
 	}

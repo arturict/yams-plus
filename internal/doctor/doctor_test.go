@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/arturict/yams-plus/internal/config"
@@ -99,5 +101,37 @@ func TestEndpointChecksAreOrderedDeterministically(t *testing.T) {
 				t.Fatalf("run %d produced %v, want %v", i, again, names)
 			}
 		}
+	}
+}
+
+// A live check that finds no indexers must clear the marker. Leaving it made
+// doctor --files-only report healthy forever once the indexers were removed.
+func TestProwlarrIndexerCheckClearsStaleMarker(t *testing.T) {
+	store := secrets.Store{Dir: t.TempDir()}
+	if err := store.Write("prowlarr_api_key", "key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Write("prowlarr_indexers_ready", "3"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.BindAddresses = []string{host}
+	cfg.Ports.Prowlarr, _ = strconv.Atoi(port)
+
+	check := prowlarrIndexerCheck(context.Background(), cfg, store)
+	if check.Status != "action-required" {
+		t.Fatalf("check = %#v, want action-required", check)
+	}
+	if store.Exists("prowlarr_indexers_ready") {
+		t.Fatal("the stale marker survived a live check that found no indexers")
 	}
 }

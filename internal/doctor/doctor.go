@@ -118,6 +118,10 @@ func prowlarrIndexerCheck(ctx context.Context, cfg config.Config, store secrets.
 		return check
 	}
 	if len(indexers) == 0 {
+		// The marker is what doctor --files-only trusts when it cannot reach
+		// Prowlarr. Leaving it behind made that report healthy forever once the
+		// indexers were removed again.
+		_ = store.Remove("prowlarr_indexers_ready")
 		return check
 	}
 	check.Status, check.Message = "healthy", fmt.Sprintf("%d indexer(s) configured", len(indexers))
