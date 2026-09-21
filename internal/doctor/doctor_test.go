@@ -59,3 +59,17 @@ func TestProwlarrIndexerCheckPersistsSuccessfulLiveCheck(t *testing.T) {
 		t.Fatalf("check=%#v marker=%v", check, store.Exists("prowlarr_indexers_ready"))
 	}
 }
+
+// A config without bind addresses must be reported, never panic the CLI.
+func TestChecksReportMissingBindAddress(t *testing.T) {
+	cfg := config.Default()
+	cfg.BindAddresses = nil
+	checks := endpointChecks(context.Background(), cfg)
+	if len(checks) != 1 || checks[0].Status != "failed" {
+		t.Fatalf("checks=%#v", checks)
+	}
+	check := prowlarrIndexerCheck(context.Background(), cfg, secrets.Store{Dir: t.TempDir()})
+	if check.Status != "failed" {
+		t.Fatalf("check=%#v", check)
+	}
+}

@@ -93,10 +93,9 @@ func Restore(paths layout.Layout, source, passphrase string) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(root, filepath.FromSlash(header.Name))
-		resolved, err := filepath.Abs(target)
-		if err != nil || (resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator))) {
-			return fmt.Errorf("unsafe backup path %q", header.Name)
+		resolved, err := safeTarget(root, header.Name)
+		if err != nil {
+			return err
 		}
 		switch header.Typeflag {
 		case tar.TypeDir:
@@ -123,6 +122,24 @@ func Restore(paths layout.Layout, source, passphrase string) error {
 		}
 	}
 	return nil
+}
+
+// safeTarget resolves an archive entry below the install root and rejects
+// traversal. The production root is "/", where the separator must not be
+// appended twice or every legitimate entry is refused.
+func safeTarget(root, name string) (string, error) {
+	resolved, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(name)))
+	if err != nil {
+		return "", fmt.Errorf("unsafe backup path %q", name)
+	}
+	prefix := root
+	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+		prefix += string(filepath.Separator)
+	}
+	if resolved == root || !strings.HasPrefix(resolved, prefix) {
+		return "", fmt.Errorf("unsafe backup path %q", name)
+	}
+	return resolved, nil
 }
 
 func addTree(writer *tar.Writer, archiveRoot, source string, includeSecrets bool, secretsDir string) error {

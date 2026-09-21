@@ -94,7 +94,11 @@ func prowlarrIndexerCheck(ctx context.Context, cfg config.Config, store secrets.
 		check.Status, check.Message = "failed", "Prowlarr API key is unavailable"
 		return check
 	}
-	host := cfg.BindAddresses[0]
+	host, err := cfg.LocalHost()
+	if err != nil {
+		check.Status, check.Message = "failed", err.Error()
+		return check
+	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s:%d/api/v1/indexer", host, cfg.Ports.Prowlarr), nil)
 	req.Header.Set("X-Api-Key", key)
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
@@ -121,12 +125,9 @@ func prowlarrIndexerCheck(ctx context.Context, cfg config.Config, store secrets.
 }
 
 func endpointChecks(ctx context.Context, cfg config.Config) []Check {
-	if len(cfg.BindAddresses) == 0 {
-		return nil
-	}
-	host := cfg.BindAddresses[0]
-	if host == "0.0.0.0" {
-		host = "127.0.0.1"
+	host, err := cfg.LocalHost()
+	if err != nil {
+		return []Check{{Name: "endpoints", Status: "failed", Message: err.Error()}}
 	}
 	targets := map[string]int{"jellyfin": cfg.Ports.Jellyfin, "seerr": cfg.Ports.Seerr, "prowlarr": cfg.Ports.Prowlarr}
 	if cfg.Modules.Movies {

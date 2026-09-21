@@ -58,6 +58,13 @@ func (c Client) PS(ctx context.Context) ([]Container, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseContainers(out)
+}
+
+// parseContainers accepts both shapes of "docker compose ps --format json": a
+// single JSON array (Compose v2.21 and newer) and one JSON object per line
+// (older releases).
+func parseContainers(out string) ([]Container, error) {
 	out = strings.TrimSpace(out)
 	if out == "" {
 		return nil, nil
@@ -65,14 +72,18 @@ func (c Client) PS(ctx context.Context) ([]Container, error) {
 	var list []Container
 	if strings.HasPrefix(out, "[") {
 		if err := json.Unmarshal([]byte(out), &list); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode compose ps output: %w", err)
 		}
 		return list, nil
 	}
 	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
 		var item Container
 		if err := json.Unmarshal([]byte(line), &item); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode compose ps line %q: %w", line, err)
 		}
 		list = append(list, item)
 	}

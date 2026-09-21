@@ -111,7 +111,10 @@ func pluginAudit(ctx context.Context, paths layout.Layout, args []string) error 
 	if err != nil {
 		return fmt.Errorf("jellyfin API token is unavailable; run apply first")
 	}
-	host := cfg.BindAddresses[0]
+	host, err := cfg.LocalHost()
+	if err != nil {
+		return err
+	}
 	api := apps.NewHTTPClient(fmt.Sprintf("http://%s:%d", host, cfg.Ports.Jellyfin))
 	api.Headers.Set("X-Emby-Token", token)
 	missing, err := (apps.Jellyfin{API: api}).AuditPlugins(ctx, cfg.Plugins.RequiredCompatible)
@@ -403,18 +406,34 @@ func uninstallCommand(ctx context.Context, paths layout.Layout, args []string) e
 }
 
 func safeRemove(root, target string) error {
-	rootAbs, err := filepath.Abs(root)
+	targetAbs, err := resolveUnder(root, target)
 	if err != nil {
 		return err
+	}
+	return os.RemoveAll(targetAbs)
+}
+
+// resolveUnder returns target as an absolute path strictly below root, or an
+// error. It touches no filesystem, so the uninstall guard is testable without
+// removing anything. The production root is "/", where the separator must not
+// be appended twice or every managed directory is refused.
+func resolveUnder(root, target string) (string, error) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
 	}
 	targetAbs, err := filepath.Abs(target)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if targetAbs == rootAbs || !strings.HasPrefix(targetAbs, rootAbs+string(filepath.Separator)) {
-		return fmt.Errorf("refusing to remove unsafe target %s", targetAbs)
+	prefix := rootAbs
+	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+		prefix += string(filepath.Separator)
 	}
-	return os.RemoveAll(targetAbs)
+	if targetAbs == rootAbs || !strings.HasPrefix(targetAbs, prefix) {
+		return "", fmt.Errorf("refusing to remove unsafe target %s", targetAbs)
+	}
+	return targetAbs, nil
 }
 
 func secretPrompt(label string) (string, error) {

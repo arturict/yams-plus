@@ -42,9 +42,12 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 		out = func(string, ...any) {}
 	}
 	store := secrets.Store{Dir: c.Paths.SecretsDir()}
-	host := c.Config.BindAddresses[0]
 	result := ConvergeResult{Services: map[string]string{}, Actions: []string{"add at least one legal indexer in Prowlarr"}}
 	readOptional := func(name string) string { value, _ := store.Read(name); return value }
+	host, err := c.Config.LocalHost()
+	if err != nil {
+		return result, err
+	}
 
 	out("Configuring Jellyfin through its API...\n")
 	jellyfinAPI := NewHTTPClient(fmt.Sprintf("http://%s:%d", host, c.Config.Ports.Jellyfin))

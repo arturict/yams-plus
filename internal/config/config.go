@@ -220,10 +220,19 @@ func (c Config) Validate() error {
 			problems = append(problems, "downloads.vpn username and password secrets are required for OpenVPN")
 		}
 	}
+	if len(c.BindAddresses) == 0 {
+		problems = append(problems, "bindAddresses must list at least one loopback, private, or Tailscale IPv4 address")
+	}
 	for _, addr := range c.BindAddresses {
 		ip := net.ParseIP(addr)
 		if ip == nil {
 			problems = append(problems, fmt.Sprintf("invalid bind address %q", addr))
+			continue
+		}
+		if ip.To4() == nil {
+			// Published ports are rendered as "ADDRESS:host:container", which is
+			// ambiguous for IPv6 literals, and every app URL is built the same way.
+			problems = append(problems, fmt.Sprintf("bind address %q must be IPv4", addr))
 			continue
 		}
 		if !ip.IsLoopback() && !ip.IsPrivate() && !strings.HasPrefix(addr, "100.") {
@@ -264,6 +273,20 @@ func (c Config) Validate() error {
 		return errors.New(strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+// LocalHost returns the address the host itself uses to reach the published
+// application ports. A wildcard bind is not a routable destination, so it maps
+// to loopback; LAN and Tailscale addresses are returned unchanged.
+func (c Config) LocalHost() (string, error) {
+	if len(c.BindAddresses) == 0 {
+		return "", errors.New("config has no bindAddresses; set at least one loopback, private, or Tailscale IPv4 address")
+	}
+	host := c.BindAddresses[0]
+	if host == "0.0.0.0" {
+		return "127.0.0.1", nil
+	}
+	return host, nil
 }
 
 func validateQuality(name string, q MediaQuality, enabled bool) error {
