@@ -449,6 +449,12 @@ func updateCommand(ctx context.Context, paths layout.Layout, args []string) erro
 	if err := stack.Remove(stale); err != nil {
 		return err
 	}
+	// update runs as root and has just rewritten the Recyclarr configuration,
+	// which the Recyclarr container reads as PUID. Without this, profile syncs
+	// failed until the next apply restored ownership.
+	if err := stack.EnsureRuntimeOwnership(cfg, paths); err != nil {
+		return err
+	}
 	if err := composeOutput(ctx, paths, "pull"); err != nil {
 		return err
 	}

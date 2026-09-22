@@ -19,6 +19,16 @@ jobs:
           go-version: '1.26.8'
           cache: true
       - run: go test -race -coverprofile=coverage.out ./...
+      # Ownership and symlink handling only shows its production behaviour as
+      # root: a non-root chown to your own UID proves nothing, and two escapes
+      # hid there while every test passed.
+      - name: Run the ownership and symlink tests as root
+        run: |
+          for pkg in ./cmd/yamsplus ./internal/stack ./internal/backup; do
+            binary="$RUNNER_TEMP/$(basename "$pkg").test"
+            go test -c -o "$binary" "$pkg"
+            (cd "$pkg" && sudo "$binary" -test.count=1)
+          done
       - run: go vet ./...
       - run: GOTOOLCHAIN=go1.26.8 go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
       - run: GOTOOLCHAIN=go1.26.8 go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
