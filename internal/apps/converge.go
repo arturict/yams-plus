@@ -143,8 +143,7 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 	var qbitHost string
 	if c.Config.Downloads.Mode == "torrent" || c.Config.Downloads.Mode == "both" {
 		out("Configuring qBittorrent and its download categories...\n")
-		qbitAPI := NewHTTPClient(fmt.Sprintf("http://%s:%d", host, c.Config.Ports.QBittorrent))
-		qbit := QBittorrent{API: qbitAPI}
+		qbit := NewQBittorrent(fmt.Sprintf("http://%s:%d", host, c.Config.Ports.QBittorrent))
 		if err := qbit.Wait(ctx); err != nil {
 			return result, err
 		}
@@ -203,7 +202,7 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 				}
 				return result, fmt.Errorf("configuring the %s qBittorrent download client needs the admin password; rerun with YAMSPLUS_ADMIN_PASSWORD set", arr.client.Name)
 			}
-			spec := DownloadClientSpec{Name: "YAMS+ qBittorrent", Implementation: "QBittorrent", Protocol: "torrent", Priority: 2, Fields: map[string]any{"host": qbitHost, "port": 8081, "useSsl": false, "username": c.Config.AdminUsername, "password": c.AdminPassword, categoryField: category}}
+			spec := DownloadClientSpec{Name: "YAMS+ qBittorrent", Implementation: "QBittorrent", Protocol: "torrent", Priority: 2, Fields: map[string]any{"host": qbitHost, "port": qbittorrentWebUIPort, "useSsl": false, "username": c.Config.AdminUsername, "password": c.AdminPassword, categoryField: category}}
 			if err := arr.client.EnsureDownloadClient(ctx, spec); err != nil {
 				return result, err
 			}

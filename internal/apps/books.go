@@ -3,7 +3,9 @@ package apps
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -84,7 +86,7 @@ func (s Shelfmark) Converge(ctx context.Context, cfg config.Config, password, ex
 	}
 	if qbitHost != "" {
 		clients["PROWLARR_TORRENT_CLIENT"] = "qbittorrent"
-		clients["QBITTORRENT_URL"] = "http://" + qbitHost + ":8081"
+		clients["QBITTORRENT_URL"] = "http://" + net.JoinHostPort(qbitHost, strconv.Itoa(qbittorrentWebUIPort))
 		clients["QBITTORRENT_USERNAME"] = cfg.AdminUsername
 		clients["QBITTORRENT_PASSWORD"] = password
 		clients["QBITTORRENT_CATEGORY"] = "books"

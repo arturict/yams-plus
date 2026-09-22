@@ -3,6 +3,7 @@ package apps
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,5 +95,49 @@ func TestQBittorrentConvergeOmitsCredentialsWhenPasswordUnknown(t *testing.T) {
 				t.Fatalf("csrf protection was not set: %v", prefs)
 			}
 		})
+	}
+}
+
+// qBittorrent 5.2 answers a successful login with 204 and no body, and while
+// host-header validation is still on (it is until the first Converge) it
+// refuses any request whose Host port differs from its own WebUI port. The
+// published port is configurable, so the login must name the container port.
+func TestQBittorrentLoginAgainstARemappedPort(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, port, _ := net.SplitHostPort(r.Host); port != "8081" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("Unauthorized"))
+			return
+		}
+		_ = r.ParseForm()
+		if r.Form.Get("username") != "admin" || r.Form.Get("password") != "temporary" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("Unauthorized"))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	qbit := NewQBittorrent(server.URL)
+	if err := qbit.Login(context.Background(), "admin", "temporary"); err != nil {
+		t.Fatalf("login through a remapped port must succeed: %v", err)
+	}
+	if err := qbit.Login(context.Background(), "admin", "wrong"); err == nil {
+		t.Fatal("a wrong password must be rejected")
+	}
+}
+
+// Releases before 5.2 answer 200 with "Ok." or "Fails.".
+func TestQBittorrentLoginReadsTheOlderTextAnswers(t *testing.T) {
+	for body, wantErr := range map[string]bool{"Ok.": false, "Fails.": true} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}))
+		err := NewQBittorrent(server.URL).Login(context.Background(), "admin", "secret")
+		server.Close()
+		if (err != nil) != wantErr {
+			t.Fatalf("body %q: err = %v, want error %v", body, err, wantErr)
+		}
 	}
 }

@@ -17,6 +17,9 @@ type HTTPClient struct {
 	BaseURL string
 	Client  *http.Client
 	Headers http.Header
+	// Host, when set, replaces the Host header of every request, for a server
+	// that checks it against a port other than the one it is reached through.
+	Host string
 }
 
 func NewHTTPClient(baseURL string) *HTTPClient {
@@ -91,6 +94,9 @@ func (c *HTTPClient) DoJSON(ctx context.Context, method, path string, body, outp
 			req.Header.Add(name, value)
 		}
 	}
+	if c.Host != "" {
+		req.Host = c.Host
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -151,6 +157,9 @@ func (c *HTTPClient) doForm(ctx context.Context, method, path string, values url
 		for _, value := range headers {
 			req.Header.Add(name, value)
 		}
+	}
+	if c.Host != "" {
+		req.Host = c.Host
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := c.Client.Do(req)
