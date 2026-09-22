@@ -149,3 +149,25 @@ func TestQualityDefaultMustBeACreatedProfile(t *testing.T) {
 		t.Fatalf("a 2160p default with 720p fallback must stay valid: %v", err)
 	}
 }
+
+// projectName is written into compose.yaml unquoted and names every container.
+func TestProjectNameFollowsComposeRules(t *testing.T) {
+	for _, name := range []string{"", "Media", "media stack", "-media", "media\nimage: evil", "media:1"} {
+		cfg := Default()
+		cfg.AdminUsername = "admin"
+		cfg.Downloads.Usenet.Host = "news.example.test"
+		cfg.ProjectName = name
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "projectName") {
+			t.Errorf("projectName %q must be rejected, got %v", name, err)
+		}
+	}
+	for _, name := range []string{"yamsplus", "media2", "media_stack-2"} {
+		cfg := Default()
+		cfg.AdminUsername = "admin"
+		cfg.Downloads.Usenet.Host = "news.example.test"
+		cfg.ProjectName = name
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("projectName %q must be accepted: %v", name, err)
+		}
+	}
+}

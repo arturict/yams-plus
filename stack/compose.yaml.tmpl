@@ -20,7 +20,7 @@ services:
   jellyfin:
     <<: *common
     image: {{ image "jellyfin" }}
-    container_name: yamsplus-jellyfin
+    container_name: {{ .ProjectName }}-jellyfin
     volumes:
       - {{ quote (printf "%s:/config" (appPath "jellyfin")) }}
       - {{ quote (printf "%s:/data/library" (dataPath "library")) }}
@@ -42,7 +42,7 @@ services:
   seerr:
     <<: *common
     image: {{ image "seerr" }}
-    container_name: yamsplus-seerr
+    container_name: {{ .ProjectName }}-seerr
     init: true
     volumes:
       - {{ quote (printf "%s:/app/config" (appPath "seerr")) }}
@@ -62,7 +62,7 @@ services:
   prowlarr:
     <<: *linuxserver
     image: {{ image "prowlarr" }}
-    container_name: yamsplus-prowlarr
+    container_name: {{ .ProjectName }}-prowlarr
     volumes:
       - {{ quote (printf "%s:/config" (appPath "prowlarr")) }}
     ports:
@@ -74,7 +74,7 @@ services:
   radarr:
     <<: *linuxserver
     image: {{ image "radarr" }}
-    container_name: yamsplus-radarr
+    container_name: {{ .ProjectName }}-radarr
     volumes:
       - {{ quote (printf "%s:/config" (appPath "radarr")) }}
       - {{ quote (printf "%s:/data" (dataPath "")) }}
@@ -88,7 +88,7 @@ services:
   sonarr:
     <<: *linuxserver
     image: {{ image "sonarr" }}
-    container_name: yamsplus-sonarr
+    container_name: {{ .ProjectName }}-sonarr
     volumes:
       - {{ quote (printf "%s:/config" (appPath "sonarr")) }}
       - {{ quote (printf "%s:/data" (dataPath "")) }}
@@ -102,7 +102,7 @@ services:
   bazarr:
     <<: *linuxserver
     image: {{ image "bazarr" }}
-    container_name: yamsplus-bazarr
+    container_name: {{ .ProjectName }}-bazarr
     volumes:
       - {{ quote (printf "%s:/config" (appPath "bazarr")) }}
       - {{ quote (printf "%s:/data/library" (dataPath "library")) }}
@@ -116,7 +116,7 @@ services:
   gluetun:
     <<: *common
     image: {{ image "gluetun" }}
-    container_name: yamsplus-gluetun
+    container_name: {{ .ProjectName }}-gluetun
     cap_add:
       - NET_ADMIN
     devices:
@@ -175,7 +175,7 @@ services:
     <<: *linuxserver
 {{- end }}
     image: {{ image "sabnzbd" }}
-    container_name: yamsplus-sabnzbd
+    container_name: {{ .ProjectName }}-sabnzbd
     volumes:
       - {{ quote (printf "%s:/config" (appPath "sabnzbd")) }}
       - {{ quote (printf "%s:/data" (dataPath "")) }}
@@ -194,7 +194,7 @@ services:
     security_opt:
       - no-new-privileges:true
     image: {{ image "qbittorrent" }}
-    container_name: yamsplus-qbittorrent
+    container_name: {{ .ProjectName }}-qbittorrent
     network_mode: service:gluetun
     environment:
       TZ: {{ quote .Timezone }}
@@ -211,7 +211,7 @@ services:
   qbittorrent:
     <<: *linuxserver
     image: {{ image "qbittorrent" }}
-    container_name: yamsplus-qbittorrent
+    container_name: {{ .ProjectName }}-qbittorrent
     environment:
       TZ: {{ quote .Timezone }}
       PUID: {{ .Runtime.PUID }}
@@ -231,7 +231,7 @@ services:
   shelfmark:
     <<: *common
     image: {{ image "shelfmark" }}
-    container_name: yamsplus-shelfmark
+    container_name: {{ .ProjectName }}-shelfmark
     volumes:
       - {{ quote (printf "%s:/config" (appPath "shelfmark")) }}
       - {{ quote (printf "%s:/data" (dataPath "")) }}
@@ -243,7 +243,7 @@ services:
   audiobookshelf:
     <<: *common
     image: {{ image "audiobookshelf" }}
-    container_name: yamsplus-audiobookshelf
+    container_name: {{ .ProjectName }}-audiobookshelf
     user: {{ quote (printf "%d:%d" .Runtime.PUID .Runtime.PGID) }}
     volumes:
       - {{ quote (printf "%s:/config" (appPath "audiobookshelf/config")) }}
@@ -259,7 +259,7 @@ services:
   recyclarr:
     <<: *common
     image: {{ image "recyclarr" }}
-    container_name: yamsplus-recyclarr
+    container_name: {{ .ProjectName }}-recyclarr
     profiles: ["tools"]
     user: {{ quote (printf "%d:%d" .Runtime.PUID .Runtime.PGID) }}
     volumes:
@@ -267,7 +267,7 @@ services:
 
 networks:
   yamsplus:
-    name: yamsplus
+    name: {{ .ProjectName }}
     driver: bridge
 
 {{- if vpnEnabled }}

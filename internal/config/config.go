@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -179,10 +180,18 @@ func Save(path string, cfg Config) error {
 	return nil
 }
 
+var projectNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
 func (c Config) Validate() error {
 	var problems []string
 	if c.SchemaVersion != SchemaVersion {
 		problems = append(problems, fmt.Sprintf("schemaVersion must be %d", SchemaVersion))
+	}
+	// projectName names the Compose project, its containers and its network,
+	// and is written into compose.yaml unquoted, so it is held to Compose's
+	// own project-name rule.
+	if !projectNamePattern.MatchString(c.ProjectName) {
+		problems = append(problems, "projectName must start with a lowercase letter or digit and contain only lowercase letters, digits, dashes and underscores")
 	}
 	if strings.TrimSpace(c.AdminUsername) == "" {
 		problems = append(problems, "adminUsername is required")

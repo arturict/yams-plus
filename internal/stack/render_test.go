@@ -209,3 +209,23 @@ func TestStaleReportsFilesThatLeftTheDesiredState(t *testing.T) {
 		t.Fatalf("removal did not converge, still stale: %v", stale)
 	}
 }
+
+// container_name and the network name were fixed to "yamsplus", so a second
+// install with its own projectName collided with the first on every container.
+func TestRenderNamesContainersAndNetworkAfterTheProject(t *testing.T) {
+	cfg := testConfig()
+	cfg.ProjectName = "media2"
+	files, err := Render(cfg, layout.New(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(files[0].Content)
+	if strings.Contains(compose, "container_name: yamsplus-") || strings.Contains(compose, "name: yamsplus\n") {
+		t.Fatalf("a fixed yamsplus name survived in compose.yaml:\n%s", compose)
+	}
+	for _, want := range []string{"name: media2\n", "container_name: media2-jellyfin\n", "container_name: media2-recyclarr\n"} {
+		if !strings.Contains(compose, want) {
+			t.Fatalf("compose.yaml lacks %q", want)
+		}
+	}
+}
