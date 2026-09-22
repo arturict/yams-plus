@@ -270,3 +270,23 @@ func TestAdminPasswordNeeded(t *testing.T) {
 		})
 	}
 }
+
+// The wizard collects the admin password and every provider credential, and
+// none of it survives a failed run. A host problem that does not depend on the
+// answers must stop the install before the first question.
+func TestInstallChecksTheHostBeforeTheWizard(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = writer.Close()
+	stdin := os.Stdin
+	os.Stdin = reader
+	t.Cleanup(func() { os.Stdin = stdin; _ = reader.Close() })
+
+	t.Setenv("PATH", "")
+	err = run([]string{"--root", t.TempDir(), "install"})
+	if err == nil || !strings.Contains(err.Error(), "preflight failed") || !strings.Contains(err.Error(), "docker") {
+		t.Fatalf("expected the missing Docker to stop the install before the wizard, got %v", err)
+	}
+}

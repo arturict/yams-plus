@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/arturict/yams-plus/internal/doctor"
 	"github.com/arturict/yams-plus/internal/engine"
 	"github.com/arturict/yams-plus/internal/layout"
+	"github.com/arturict/yams-plus/internal/preflight"
 	"github.com/arturict/yams-plus/internal/secrets"
 	"github.com/arturict/yams-plus/internal/stack"
 	"github.com/arturict/yams-plus/internal/state"
@@ -172,6 +174,18 @@ func install(ctx context.Context, paths layout.Layout, args []string) error {
 	var cfg config.Config
 	var password string
 	values := map[string]string{}
+	// The wizard and the prompts below collect the admin password and provider
+	// credentials, none of which are kept unless the install gets far enough to
+	// store them. Check the host first, so a missing Docker or a missing sudo
+	// is reported before anything has been typed rather than after.
+	if !*dryRun && !*skipStart {
+		if err := requireRoot(paths); err != nil {
+			return err
+		}
+		if err := preflight.Failed(preflight.Run(ctx, isProductionRoot(paths), nil, nil)); err != nil {
+			return err
+		}
+	}
 	if *configPath == "" {
 		result, err := wizard.New(os.Stdin, os.Stdout).Run()
 		if err != nil {
@@ -238,6 +252,11 @@ func apply(ctx context.Context, paths layout.Layout, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if !*dryRun && !*skipStart {
+		if err := requireRoot(paths); err != nil {
+			return err
+		}
+	}
 	cfg, err := config.Load(paths.ConfigFile())
 	if err != nil {
 		return err
@@ -287,6 +306,20 @@ func collectMissingSecrets(paths layout.Layout, cfg config.Config) (map[string]s
 
 func secretEnvSuffix(name string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(name))
+}
+
+func isProductionRoot(paths layout.Layout) bool {
+	return paths.Root == "/" || paths.Root == string(filepath.Separator)
+}
+
+// requireRoot refuses a real install or apply without root before any prompt.
+// Without it the run collected every answer and then failed creating
+// /etc/yamsplus with "permission denied".
+func requireRoot(paths layout.Layout) error {
+	if !isProductionRoot(paths) || runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		return nil
+	}
+	return errors.New("this writes to /etc/yamsplus, /var/lib/yamsplus and /opt/yamsplus and manages containers; rerun it with sudo")
 }
 
 // adminPasswordNeeded reports whether an apply must ask for the shared admin

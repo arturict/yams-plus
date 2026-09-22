@@ -17,12 +17,23 @@ go build -trimpath -o yamsplus ./cmd/yamsplus
 sudo ./yamsplus install
 ```
 
-Expected beginning:
+The host is checked before the first question, so a missing Docker, an
+unsupported distribution or a missing `sudo` stops the install before you have
+typed anything. When the host is ready, the wizard begins:
 
 ```text
-YAMS Plus preflight
-healthy          operating-system     Debian 13
-healthy          architecture         amd64
+YAMS Plus beta — fewer dashboards, more movie night.
+Nothing is published and you will add indexers yourself in Prowlarr.
+Admin username [admin]:
+```
+
+After the last answer, every check is listed with its result before anything
+is written, for example:
+
+```text
+healthy          architecture         linux/amd64
+healthy          docker               29.8.1
+healthy          compose              5.5.1
 ```
 
 The checked-in `install.sh` is reserved for signed release bundles. It installs
