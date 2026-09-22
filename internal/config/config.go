@@ -330,11 +330,18 @@ func validateQuality(name string, q MediaQuality, enabled bool) error {
 		}
 		seen[profile] = true
 	}
-	if !seen[q.DefaultProfile] {
-		return fmt.Errorf("quality.%s default must be one of its profiles", name)
+	if seen["720p"] && !seen["1080p"] {
+		return fmt.Errorf("quality.%s selects 720p without 1080p; 720p creates no profile because it is a fallback tier of the 1080p profile, not a profile of its own", name)
 	}
-	if len(RenderedProfiles(q.Profiles)) == 0 {
-		return fmt.Errorf("quality.%s must select 1080p or 2160p; 720p alone creates no profile because it is a fallback tier of the 1080p profile, not a profile of its own", name)
+	rendered := RenderedProfiles(q.Profiles)
+	if len(rendered) == 0 {
+		return fmt.Errorf("quality.%s must select 1080p or 2160p", name)
+	}
+	// Seerr requests with the default profile, so it has to be one Recyclarr
+	// actually creates; a 720p default passed here and then failed the install
+	// at the Seerr step, after every image had been pulled.
+	if !seen[q.DefaultProfile] || !slices.Contains(rendered, q.DefaultProfile) {
+		return fmt.Errorf("quality.%s default must be one of its selected profiles and either 1080p or 2160p, not %q", name, q.DefaultProfile)
 	}
 	return nil
 }

@@ -189,13 +189,18 @@ func (w Wizard) Run() (Result, error) {
 
 func (w Wizard) mediaQuality(label string, advanced4K bool) (config.MediaQuality, error) {
 	profiles := []string{}
-	sevenTwenty, err := w.yesNo("Accept 720p "+label+" releases as a fallback below 1080p", false)
-	if err != nil {
-		return config.MediaQuality{}, err
-	}
 	fullHD, err := w.yesNo("Support 1080p "+label+" releases (recommended)", true)
 	if err != nil {
 		return config.MediaQuality{}, err
+	}
+	// 720p is a lower tier inside the 1080p profile, not a profile of its own,
+	// so it is only offered once 1080p is selected.
+	sevenTwenty := false
+	if fullHD {
+		sevenTwenty, err = w.yesNo("Accept 720p "+label+" releases as a fallback below 1080p", false)
+		if err != nil {
+			return config.MediaQuality{}, err
+		}
 	}
 	fourKLabel := "Support 4K " + label + " releases"
 	if advanced4K && label == "series" {
@@ -214,21 +219,17 @@ func (w Wizard) mediaQuality(label string, advanced4K bool) (config.MediaQuality
 	if fourK {
 		profiles = append(profiles, "2160p")
 	}
-	if len(profiles) == 0 {
-		return config.MediaQuality{}, fmt.Errorf("select at least one %s quality", label)
+	// Only a profile Recyclarr creates can be the default Seerr requests with.
+	rendered := config.RenderedProfiles(profiles)
+	if len(rendered) == 0 {
+		return config.MediaQuality{}, fmt.Errorf("select 1080p or 4K %s", label)
 	}
-	if len(config.RenderedProfiles(profiles)) == 0 {
-		return config.MediaQuality{}, fmt.Errorf("select 1080p or 4K %s: 720p is only a fallback tier of the 1080p profile", label)
-	}
-	defaultProfile := profiles[0]
-	for _, profile := range profiles {
-		if profile == "1080p" {
-			defaultProfile = profile
+	defaultProfile := rendered[0]
+	if len(rendered) > 1 {
+		defaultProfile, err = w.choiceDefault("Default "+label+" quality", rendered, defaultProfile)
+		if err != nil {
+			return config.MediaQuality{}, err
 		}
-	}
-	defaultProfile, err = w.choiceDefault("Default "+label+" quality", profiles, defaultProfile)
-	if err != nil {
-		return config.MediaQuality{}, err
 	}
 	return config.MediaQuality{Profiles: profiles, DefaultProfile: defaultProfile, FallbackUpgrade: true}, nil
 }

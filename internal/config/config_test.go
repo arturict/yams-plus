@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDefaultNeedsProviderHost(t *testing.T) {
 	cfg := Default()
@@ -118,5 +121,31 @@ func TestSevenTwentyIsAFallbackTierNotAProfile(t *testing.T) {
 	}
 	if got := RenderedProfiles([]string{"720p"}); len(got) != 0 {
 		t.Fatalf("RenderedProfiles = %v, want none", got)
+	}
+}
+
+// Seerr requests with the default profile, so a default Recyclarr never
+// creates must fail validation instead of the install, and 720p without 1080p
+// is a silent no-op.
+func TestQualityDefaultMustBeACreatedProfile(t *testing.T) {
+	for _, q := range []MediaQuality{
+		{Profiles: []string{"720p", "1080p"}, DefaultProfile: "720p"},
+		{Profiles: []string{"720p", "2160p"}, DefaultProfile: "2160p"},
+		{Profiles: []string{"1080p"}, DefaultProfile: "2160p"},
+	} {
+		cfg := Default()
+		cfg.AdminUsername = "admin"
+		cfg.Downloads.Usenet.Host = "news.example.test"
+		cfg.Quality.Movies = q
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "quality.movies") {
+			t.Errorf("%v with default %s must be rejected on its quality, got %v", q.Profiles, q.DefaultProfile, err)
+		}
+	}
+	cfg := Default()
+	cfg.AdminUsername = "admin"
+	cfg.Downloads.Usenet.Host = "news.example.test"
+	cfg.Quality.Movies = MediaQuality{Profiles: []string{"720p", "1080p", "2160p"}, DefaultProfile: "2160p"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a 2160p default with 720p fallback must stay valid: %v", err)
 	}
 }
