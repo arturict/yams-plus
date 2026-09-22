@@ -56,10 +56,20 @@ right to obtain.
 
 ARM64 and other distributions are not supported by this beta.
 
-## Try the source beta
+## Install
 
-There is no signed public CLI release yet. If you want to test the current
-source, inspect it first and build it on a supported host:
+Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/),
+then fetch the bootstrapper from the release tag, read it, and run it:
+
+```sh
+curl -fLO https://raw.githubusercontent.com/arturict/yams-plus/v0.1.0/install.sh
+less install.sh
+sudo sh install.sh --version 0.1.0
+```
+
+It verifies the Sigstore signature and checksum of the release before
+installing `yamsplus` and starting the wizard. To build from source instead,
+inspect it first and build it on a supported host:
 
 ```sh
 git clone https://github.com/arturict/yams-plus.git
