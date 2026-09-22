@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,7 +63,7 @@ func TestBazarrConvergeOmitsAuthWhenPasswordUnknown(t *testing.T) {
 					w.WriteHeader(http.StatusNoContent)
 				case r.URL.Path == "/api/system/settings":
 					// Verify reads the settings back.
-					_, _ = w.Write([]byte(`{"general":{"use_sonarr":true,"use_radarr":true}}`))
+					_, _ = w.Write([]byte(`{"general":{"use_sonarr":true,"use_radarr":true},"analytics":{"enabled":false}}`))
 				case r.URL.Path == "/api/system/languages/profiles":
 					_, _ = w.Write([]byte(`[{"profileId":1,"name":"YAMS+ subtitles"}]`))
 				default:
@@ -91,6 +92,29 @@ func TestBazarrConvergeOmitsAuthWhenPasswordUnknown(t *testing.T) {
 			if form.Get("settings-sonarr-apikey") != "sonarr-key" {
 				t.Fatalf("sonarr key was not configured: %v", form)
 			}
+			if form.Get("settings-analytics-enabled") != "false" {
+				t.Fatalf("Bazarr analytics were not turned off: %v", form)
+			}
 		})
+	}
+}
+
+// Bazarr defaults analytics.enabled to true. If a settings write does not
+// stick, Verify must say so instead of reporting a converged Bazarr.
+func TestBazarrVerifyRejectsEnabledAnalytics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/system/settings":
+			_, _ = w.Write([]byte(`{"general":{"use_sonarr":true,"use_radarr":true},"analytics":{"enabled":true}}`))
+		case "/api/system/languages/profiles":
+			_, _ = w.Write([]byte(`[{"profileId":1,"name":"YAMS+ subtitles"}]`))
+		}
+	}))
+	defer server.Close()
+	cfg := config.Default()
+	cfg.Modules.Series, cfg.Modules.Movies = true, true
+	err := (Bazarr{API: NewHTTPClient(server.URL), APIKey: "key"}).Verify(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "analytics") {
+		t.Fatalf("expected Verify to report enabled analytics, got %v", err)
 	}
 }

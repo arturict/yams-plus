@@ -54,6 +54,10 @@ func (b Bazarr) Converge(ctx context.Context, cfg config.Config, password, sonar
 		"settings-general-movie_default_profile": {"1"},
 		"settings-general-enabled_providers":     {cfg.Subtitles.Provider},
 		"settings-general-chmod":                 {"0660"},
+		// Bazarr ships with analytics.enabled defaulting to true and then sends
+		// Google Analytics events naming the subtitle provider, languages and
+		// app versions. YAMS Plus promises an installed stack without telemetry.
+		"settings-analytics-enabled": {"false"},
 	}
 	// A re-apply that was not given the admin password must leave the existing
 	// credentials alone. Sending an empty password reset Bazarr's form auth to
@@ -106,6 +110,10 @@ func (b Bazarr) Verify(ctx context.Context, cfg config.Config) error {
 	}
 	if cfg.Modules.Movies && !truthy(general["use_radarr"]) {
 		return fmt.Errorf("Bazarr did not retain the Radarr connection")
+	}
+	analytics, _ := settings["analytics"].(map[string]any)
+	if truthy(analytics["enabled"]) {
+		return fmt.Errorf("Bazarr kept its analytics enabled")
 	}
 	var profiles []map[string]any
 	if err := b.API.DoJSON(ctx, http.MethodGet, "/api/system/languages/profiles", nil, &profiles); err != nil {
