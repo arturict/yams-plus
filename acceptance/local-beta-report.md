@@ -1,4 +1,192 @@
-# Beta candidate evidence — 2026-08-07
+# Beta candidate evidence
+
+Three runs are recorded here. The 2026-09-22 run is the current state; the
+2026-09-21 run and the original 2026-08-07 beta-candidate evidence stay below,
+because the container-scan comparison depends on them.
+
+# Run 3 — 2026-09-22
+
+Same host, against the branch after a release-readiness audit and its fixes.
+Isolated roots under `/tmp`, separate Compose projects (`ypaudit`,
+`ypaudit2`), loopback-only alternate ports, placeholder provider credentials,
+no indexer, no media, a random admin password never printed. The prepared
+production install under `/etc/yamsplus` and `/opt/yamsplus` was not touched.
+
+## Torrent install, never run end to end before
+
+Movies, series and subtitles with qBittorrent and no VPN. Run 2 exercised only
+the Usenet shape live, so its "clean second apply" said nothing about torrent,
+and this run found two defects before it could get to the one it was meant to
+check:
+
+- **qBittorrent 5.2 logins failed.** The lock moved qBittorrent to 5.2.3,
+  which answers a successful login with `204` and no body; the client accepted
+  only `Ok.`. Separately, until host-header validation is turned off,
+  qBittorrent refuses a Host port other than its own WebUI port, so a
+  published port other than 8081 got `401`. Reproduced by hand: `401` through
+  the remapped port, `204` with the container port, `204` through the
+  remapped port once validation was off. Both fixed.
+- **Seerr refused every apply after the first** with `403 invalid csrf token`,
+  because convergence had turned on Seerr's `csrfProtection`, which Seerr
+  describes as "set external API access to read-only (requires HTTPS)". Its
+  CSRF cookies are `Secure`, so a browser on a plain-HTTP LAN or Tailscale
+  address would not return them either. It is now left off, switched off where
+  it was on (one Seerr restart), and the write is no longer error-swallowed.
+  On a stack that already had it on: the first re-apply turned it off and
+  restarted Seerr, the second ran clean, API-key writes succeed.
+
+With those fixed, from a fresh root:
+
+| Step | Result |
+| --- | --- |
+| Install | exit 0 |
+| Second apply with the pre-fix password logic (built from the parent of that fix plus the qBittorrent fix), no password | exit 1: `qBittorrent login failed … 401 … temporary WebUI password was not found` |
+| Second apply with the fix | asked once for the password, exit 0 |
+| Third apply | exit 0, no Seerr restart |
+| `doctor --json` | 18 checks, 0 failed, 1 action required (the Prowlarr indexer) |
+| Bazarr `analytics.enabled` | `false` (the image defaults to `true`) |
+| Seerr `csrfProtection` | `false` |
+| qBittorrent login through the published port | admin password `204`, empty password `401` |
+
+## Usenet install with Books
+
+| Step | Result |
+| --- | --- |
+| Install | exit 0 |
+| Second apply with no password and no terminal | exit 0, zero password prompts |
+| `backup` of the running stack | stopped and restarted all nine running services, exit 0 |
+| `restore` into an empty root | `yamsplus.yaml`, `compose.yaml` and the lock byte-identical; secrets `0600` in a `0750` directory; wrong passphrase refused |
+
+The archive has no `jellyfin.db-wal` or `-shm`: Jellyfin was stopped and
+checkpointed before the copy. Every file the source had and the restore did
+not was written after the backup finished.
+
+A `doctor` run five seconds after the backup reported four endpoints down while
+the services were still booting. Measured separately: `doctor` 0 failed before,
+the backup took 16 seconds, and `doctor` was at 0 failed again 19 seconds
+after it returned. The stack is briefly unavailable during a backup, as the
+recovery guide now says.
+
+## Automated gates
+
+`go test -race ./...`, `go vet` for Linux and Windows, an arm64 build,
+Staticcheck v0.7.0 and Gitleaks green. The `cmd/yamsplus`, `internal/stack`
+and `internal/backup` tests also pass as root, locally and in CI's new root
+step.
+
+## Still not proven
+
+- The VPN shapes (Gluetun) live, which need VPN credentials.
+- The authorised media path, the UI-level plugin checks and the Debian 13 and
+  Ubuntu 24.04 VM scenarios, as before.
+- The container scan, as before.
+
+# Run 2 — 2026-09-21
+
+Ubuntu 24.04 / amd64 host (`x1`, 8 logical CPUs, 15 GiB RAM, Docker 29.8.1,
+Compose 5.5.1), against the branch that recovers the unpublished worktree
+fixes, fixes four further defects and refreshes the image lock. Every run used
+an isolated install root, a separate Compose project, loopback-only alternate
+ports, placeholder provider credentials, no indexer and no media. The prepared
+production install under `/etc/yamsplus` was not touched and still has zero
+running containers.
+
+## What was proven
+
+- Full-module install (movies, series, subtitles, Books) converged through the
+  application APIs. `doctor --json`: **22 checks, 0 failed, 1 action required**,
+  the action being the intentional manual Prowlarr indexer step.
+- `plugins audit --json`: all 13 required compatible plugins active.
+- A second `apply` with no admin password and no provider credentials in the
+  environment reported all five generated files `unchanged`.
+- Encrypted backup and restore into a separate empty root: the archive is
+  `age-encryption.org/v1` scrypt, restored `yamsplus.yaml` and `compose.yaml`
+  are byte-identical to the source, secrets land at mode `0600` inside a `0750`
+  root-only directory, and a wrong passphrase is refused.
+- `stop` then `start`: 22 checks, 0 failed again.
+- `uninstall --yes` removed the containers and the three managed directories
+  and preserved the media root.
+- All five downloader shapes rendered and passed `docker compose config`, with
+  no floating `latest` tag, no Docker socket mount and no privileged container.
+- **Host independence**: the same binary rendered all five shapes on Ubuntu
+  24.04 (`x1`) and Ubuntu 26.04 (`dev-t15`) into the same root path. All 28
+  generated files are byte-identical across the two hosts and the recorded
+  config digests match; only `state.json` differs, in its `updatedAt` stamp.
+- The refreshed image lock was installed end to end on Radarr 6.4.4, Sonarr
+  4.0.20, Prowlarr 2.6.5, SABnzbd 5.1.3, Bazarr 1.6.1, Recyclarr 8.7.2,
+  Audiobookshelf 2.36.1 and Shelfmark 1.3.15: 22 checks / 0 failed / 1 action
+  required, 13 of 13 plugins active, a warning-free Recyclarr sync and a clean
+  second apply.
+
+## Automated gates
+
+- PASS: `go test -race ./...`, `go vet ./...`, Staticcheck v0.7.0, Gitleaks.
+- PASS: govulncheck v1.6.0 on Go 1.26.8 — zero vulnerabilities your code calls.
+  One module-level advisory remains and cannot be cleared: GO-2026-5932,
+  `golang.org/x/crypto/openpgp` is unmaintained, fixed in N/A, not reachable
+  from this code.
+- PASS: guide `npm ci`, `npm run build` (astro check: 0 errors) and 14 of 14
+  Playwright link, navigation, accessibility and analytics tests.
+- `npm audit`: 0 High, 0 Critical, 1 moderate (`devalue` <5.9.1, transitive).
+- ARM64 **compiles** (`GOOS=linux GOARCH=arm64 go build` succeeds). It is not
+  shipped because `.goreleaser.yaml` builds only `linux-amd64`, the lock
+  records `architecture: amd64`, and preflight hard-fails off amd64.
+
+## Blocking container scan, rescanned
+
+Trivy 0.73.0 at High/Critical against the twelve digests the lock pinned in
+August — byte-identical images, so the whole delta is the vulnerability
+database catching up, not a change in the stack.
+
+| Locked image | High Aug → Sep | Critical Aug → Sep |
+| --- | --- | --- |
+| Jellyfin | 45 → 123 | 5 → 4 |
+| Seerr | 80 → 104 | 4 → 6 |
+| Radarr | 40 → 52 | 0 → 0 |
+| Sonarr | 7 → 11 | 0 → 0 |
+| Prowlarr | 40 → 52 | 0 → 0 |
+| Bazarr | 2 → 63 | 0 → 0 |
+| SABnzbd | 6 → 29 | 0 → 0 |
+| qBittorrent | 0 → 23 | 0 → 0 |
+| Gluetun | 15 → 26 | 0 → 0 |
+| Recyclarr | 0 → 14 | 0 → 0 |
+| Audiobookshelf | 61 → 83 | 4 → 4 |
+| Shelfmark | 578 → 930 | 46 → 49 |
+| **Total** | **874 → 1510** | **59 → 63** |
+
+Nothing improved. The two images August could call clean, qBittorrent and
+Recyclarr at 0/0, are now 23 and 14 High. Shelfmark dominates: `chromium` and
+`chromium-common` alone account for 614 of its 930 High and 42 of its 49
+Critical findings, from a base image that is several Debian chromium releases
+behind. Radarr's and Prowlarr's 52 are nine unique .NET runtime CVEs counted
+once per installed copy. The Seerr `handlebars` and `tar` Critical findings the
+August report named are still present and still fixable.
+
+This candidate must not be called security-gate green. That conclusion is
+unchanged from August and the numbers are worse.
+
+## Outstanding acceptance
+
+Unchanged from August unless stated:
+
+- No authorised film or series was supplied, so no media was requested or
+  downloaded, and no Prowlarr indexer was added. Both legacy Newshosting
+  configurations on this host still fail NNTP TLS authentication with `502
+  Authentication Failed`, so the download path cannot be proven without valid
+  provider credentials from the owner.
+- The UI-level plugin scenario (Editor's Choice shelf, Intro Skipper two-episode
+  fixture, playback report entry, metadata searches, a normal user request)
+  still needs a browser session against a real library.
+- Disposable Debian 13 and Ubuntu 24.04 VM scenarios are still not run. The
+  Ubuntu 26.04 render-parity check above is evidence of host independence for
+  the generated files, not a substitute for a full install on a second distro.
+- No signed or tagged CLI release, and no ARM64 artifact.
+- **New**: Jellyfin cannot be moved past 10.11.11 yet. Jellyfin 12 disables
+  legacy authorization by default, which retires the `X-Emby-Token` header the
+  convergence code authenticates with, and the required `Custom Tabs` plugin has
+  no Jellyfin 12 build.
+
+# Run 1 — 2026-08-07
 
 This report contains local implementation evidence, an isolated x1 smoke test
 and the public documentation deployment. It is not the completed authorised
@@ -81,7 +269,8 @@ scenarios remain outstanding.
 - The initial no-`--prod` deployment was nevertheless assigned Vercel's
   production target and stable `vercel.app` alias for the new project. No
   custom domain was attached and no domain was purchased.
-- All nine guide routes returned HTTP 200, the deliberate missing route
+- All guide routes returned HTTP 200 (nine documentation pages plus the
+  landing page), the deliberate missing route
   returned 404, the sitemap contains no `example.invalid` URLs, and 14 local
   Playwright link, navigation, accessibility and analytics tests passed
   against the production build before deployment.

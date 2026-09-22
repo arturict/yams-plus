@@ -42,9 +42,12 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 		out = func(string, ...any) {}
 	}
 	store := secrets.Store{Dir: c.Paths.SecretsDir()}
-	host := c.Config.BindAddresses[0]
 	result := ConvergeResult{Services: map[string]string{}, Actions: []string{"add at least one legal indexer in Prowlarr"}}
 	readOptional := func(name string) string { value, _ := store.Read(name); return value }
+	host, err := c.Config.LocalHost()
+	if err != nil {
+		return result, err
+	}
 
 	out("Configuring Jellyfin through its API...\n")
 	jellyfinAPI := NewHTTPClient(fmt.Sprintf("http://%s:%d", host, c.Config.Ports.Jellyfin))
@@ -71,6 +74,9 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 		}
 		client.Authenticate(key)
 		if err := client.EnsureHostAuth(ctx, c.Config.AdminUsername, c.AdminPassword); err != nil {
+			return err
+		}
+		if err := client.EnsureAnalyticsDisabled(ctx); err != nil {
 			return err
 		}
 		if root != "" {
@@ -137,8 +143,7 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 	var qbitHost string
 	if c.Config.Downloads.Mode == "torrent" || c.Config.Downloads.Mode == "both" {
 		out("Configuring qBittorrent and its download categories...\n")
-		qbitAPI := NewHTTPClient(fmt.Sprintf("http://%s:%d", host, c.Config.Ports.QBittorrent))
-		qbit := QBittorrent{API: qbitAPI}
+		qbit := NewQBittorrent(fmt.Sprintf("http://%s:%d", host, c.Config.Ports.QBittorrent))
 		if err := qbit.Wait(ctx); err != nil {
 			return result, err
 		}
@@ -182,7 +187,22 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 			}
 		}
 		if qbitHost != "" {
-			spec := DownloadClientSpec{Name: "YAMS+ qBittorrent", Implementation: "QBittorrent", Protocol: "torrent", Priority: 2, Fields: map[string]any{"host": qbitHost, "port": 8081, "useSsl": false, "username": c.Config.AdminUsername, "password": c.AdminPassword, categoryField: category}}
+			// EnsureDownloadClient rebuilds the body from the schema, so every
+			// field it does not set falls back to a schema default. With an
+			// unknown admin password that wrote an empty qBittorrent password
+			// into the arr, breaking the download client it had configured.
+			if c.AdminPassword == "" {
+				configured, err := arr.client.HasDownloadClient(ctx, "YAMS+ qBittorrent")
+				if err != nil {
+					return result, err
+				}
+				if configured {
+					out("Leaving the existing %s qBittorrent download client untouched; no admin password was supplied.\n", arr.client.Name)
+					continue
+				}
+				return result, fmt.Errorf("configuring the %s qBittorrent download client needs the admin password; rerun with YAMSPLUS_ADMIN_PASSWORD set", arr.client.Name)
+			}
+			spec := DownloadClientSpec{Name: "YAMS+ qBittorrent", Implementation: "QBittorrent", Protocol: "torrent", Priority: 2, Fields: map[string]any{"host": qbitHost, "port": qbittorrentWebUIPort, "useSsl": false, "username": c.Config.AdminUsername, "password": c.AdminPassword, categoryField: category}}
 			if err := arr.client.EnsureDownloadClient(ctx, spec); err != nil {
 				return result, err
 			}
@@ -295,7 +315,7 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 	out("Connecting Seerr and enabling automatic requests...\n")
 	seerrAPI := NewHTTPClient(fmt.Sprintf("http://%s:%d", host, c.Config.Ports.Seerr))
 	seerr := Seerr{API: seerrAPI}
-	seerrKey, err := seerr.Bootstrap(ctx, c.Config, c.AdminPassword, host, readOptional("seerr_api_key"))
+	seerrKey, restartSeerr, err := seerr.Bootstrap(ctx, c.Config, c.AdminPassword, host, readOptional("seerr_api_key"))
 	if err != nil {
 		return result, err
 	}
@@ -310,6 +330,15 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 	}
 	if sonarr := arrs["sonarr"]; sonarr != nil {
 		if err := seerr.EnsureServarr(ctx, c.Config, "sonarr", sonarr.profiles, sonarr.roots, sonarr.key); err != nil {
+			return result, err
+		}
+	}
+	if restartSeerr {
+		out("Restarting Seerr to turn off its CSRF protection...\n")
+		if _, err := c.Compose.Run(ctx, "restart", "seerr"); err != nil {
+			return result, err
+		}
+		if err := seerrAPI.Wait(ctx, "/api/v1/status", 5*time.Minute); err != nil {
 			return result, err
 		}
 	}
@@ -361,13 +390,42 @@ func (c Converger) writeRecyclarrSecrets(arrs map[string]*arrState) error {
 		return err
 	}
 	path := filepath.Join(c.Paths.RecyclarrDir(), "secrets.yml")
-	if err := os.WriteFile(path, []byte(out.String()), 0o600); err != nil {
+	// This directory is bind-mounted into the Recyclarr container as /config,
+	// which runs as PUID. os.WriteFile follows a symlink, so replacing this
+	// file with a link to a root-owned path would have had apply truncate and
+	// rewrite that path as root. Writing a fresh temp file and renaming over
+	// the entry replaces a link instead of following it.
+	tmp, err := os.CreateTemp(c.Paths.RecyclarrDir(), ".secrets-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = tmp.Close(); _ = os.Remove(tmpName) }
+	if err := tmp.Chmod(0o600); err != nil {
+		cleanup()
+		return err
+	}
+	if _, err := tmp.WriteString(out.String()); err != nil {
+		cleanup()
 		return err
 	}
 	if runtime.GOOS != "windows" {
-		if err := os.Chown(path, c.Config.Runtime.PUID, c.Config.Runtime.PGID); err != nil {
+		if err := tmp.Chown(c.Config.Runtime.PUID, c.Config.Runtime.PGID); err != nil {
+			cleanup()
 			return fmt.Errorf("set ownership on %s: %w", path, err)
 		}
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
 	}
 	return nil
 }

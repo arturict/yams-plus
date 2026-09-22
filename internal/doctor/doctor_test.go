@@ -8,6 +8,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/arturict/yams-plus/internal/config"
@@ -57,5 +60,78 @@ func TestProwlarrIndexerCheckPersistsSuccessfulLiveCheck(t *testing.T) {
 	check := prowlarrIndexerCheck(context.Background(), cfg, store)
 	if check.Status != "healthy" || !store.Exists("prowlarr_indexers_ready") {
 		t.Fatalf("check=%#v marker=%v", check, store.Exists("prowlarr_indexers_ready"))
+	}
+}
+
+// A config without bind addresses must be reported, never panic the CLI.
+func TestChecksReportMissingBindAddress(t *testing.T) {
+	cfg := config.Default()
+	cfg.BindAddresses = nil
+	checks := endpointChecks(context.Background(), cfg)
+	if len(checks) != 1 || checks[0].Status != "failed" {
+		t.Fatalf("checks=%#v", checks)
+	}
+	check := prowlarrIndexerCheck(context.Background(), cfg, secrets.Store{Dir: t.TempDir()})
+	if check.Status != "failed" {
+		t.Fatalf("check=%#v", check)
+	}
+}
+
+// doctor --json is consumed by scripts, so the check list must not depend on
+// Go map iteration order.
+func TestEndpointChecksAreOrderedDeterministically(t *testing.T) {
+	cfg := config.Default()
+	cfg.Modules.Books = true
+	cfg.Downloads.Mode = "both"
+	first := endpointChecks(context.Background(), cfg)
+	if len(first) < 2 {
+		t.Fatalf("expected several endpoint checks, got %d", len(first))
+	}
+	names := make([]string, len(first))
+	for i, check := range first {
+		names[i] = check.Name
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Fatalf("checks are not in a stable sorted order: %v", names)
+	}
+	for i := 0; i < 8; i++ {
+		again := endpointChecks(context.Background(), cfg)
+		for j := range again {
+			if again[j].Name != names[j] {
+				t.Fatalf("run %d produced %v, want %v", i, again, names)
+			}
+		}
+	}
+}
+
+// A live check that finds no indexers must clear the marker. Leaving it made
+// doctor --files-only report healthy forever once the indexers were removed.
+func TestProwlarrIndexerCheckClearsStaleMarker(t *testing.T) {
+	store := secrets.Store{Dir: t.TempDir()}
+	if err := store.Write("prowlarr_api_key", "key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Write("prowlarr_indexers_ready", "3"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.BindAddresses = []string{host}
+	cfg.Ports.Prowlarr, _ = strconv.Atoi(port)
+
+	check := prowlarrIndexerCheck(context.Background(), cfg, store)
+	if check.Status != "action-required" {
+		t.Fatalf("check = %#v, want action-required", check)
+	}
+	if store.Exists("prowlarr_indexers_ready") {
+		t.Fatal("the stale marker survived a live check that found no indexers")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -94,7 +95,11 @@ func prowlarrIndexerCheck(ctx context.Context, cfg config.Config, store secrets.
 		check.Status, check.Message = "failed", "Prowlarr API key is unavailable"
 		return check
 	}
-	host := cfg.BindAddresses[0]
+	host, err := cfg.LocalHost()
+	if err != nil {
+		check.Status, check.Message = "failed", err.Error()
+		return check
+	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s:%d/api/v1/indexer", host, cfg.Ports.Prowlarr), nil)
 	req.Header.Set("X-Api-Key", key)
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
@@ -113,6 +118,10 @@ func prowlarrIndexerCheck(ctx context.Context, cfg config.Config, store secrets.
 		return check
 	}
 	if len(indexers) == 0 {
+		// The marker is what doctor --files-only trusts when it cannot reach
+		// Prowlarr. Leaving it behind made that report healthy forever once the
+		// indexers were removed again.
+		_ = store.Remove("prowlarr_indexers_ready")
 		return check
 	}
 	check.Status, check.Message = "healthy", fmt.Sprintf("%d indexer(s) configured", len(indexers))
@@ -121,12 +130,9 @@ func prowlarrIndexerCheck(ctx context.Context, cfg config.Config, store secrets.
 }
 
 func endpointChecks(ctx context.Context, cfg config.Config) []Check {
-	if len(cfg.BindAddresses) == 0 {
-		return nil
-	}
-	host := cfg.BindAddresses[0]
-	if host == "0.0.0.0" {
-		host = "127.0.0.1"
+	host, err := cfg.LocalHost()
+	if err != nil {
+		return []Check{{Name: "endpoints", Status: "failed", Message: err.Error()}}
 	}
 	targets := map[string]int{"jellyfin": cfg.Ports.Jellyfin, "seerr": cfg.Ports.Seerr, "prowlarr": cfg.Ports.Prowlarr}
 	if cfg.Modules.Movies {
@@ -150,7 +156,15 @@ func endpointChecks(ctx context.Context, cfg config.Config) []Check {
 	}
 	client := &http.Client{Timeout: 3 * time.Second}
 	var checks []Check
-	for name, port := range targets {
+	// Ranging over the map directly made doctor --json emit its checks in a
+	// different order on every run, which no consumer can diff.
+	names := make([]string, 0, len(targets))
+	for name := range targets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		port := targets[name]
 		url := fmt.Sprintf("http://%s:%d", host, port)
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		resp, err := client.Do(req)

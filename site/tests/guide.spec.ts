@@ -29,7 +29,7 @@ test('guide renders, navigates, and has no serious accessibility failures', asyn
   await page.screenshot({ path: '../acceptance/screenshots/guide-home.png', fullPage: true });
   await page.getByRole('link', { name: 'Install the beta' }).click();
   await expect(page).toHaveURL(/\/install\/$/);
-  await expect(page.getByRole('heading', { name: 'Install' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Install', exact: true })).toBeVisible();
 });
 
 test('analytics are production-scoped and strip unsafe URL data', async ({ page }) => {

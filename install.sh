@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
 
-VERSION="${YAMSPLUS_VERSION:-}"
+# /etc/os-release is sourced below and defines VERSION itself, so the
+# requested release must not be held in a variable of that name.
+RELEASE_VERSION="${YAMSPLUS_VERSION:-}"
 BASE_URL="${YAMSPLUS_RELEASE_BASE_URL:-https://github.com/arturict/yams-plus/releases/download}"
 LOCAL_DIR=""
 SKIP_SIGNATURE=false
@@ -12,7 +14,7 @@ usage() {
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --version) VERSION=$2; shift 2 ;;
+    --version) RELEASE_VERSION=$2; shift 2 ;;
     --local-dir) LOCAL_DIR=$2; shift 2 ;;
     --skip-signature) SKIP_SIGNATURE=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -56,17 +58,15 @@ trap 'rm -rf "$WORK_DIR"' EXIT INT TERM
 if [ -n "$LOCAL_DIR" ]; then
   cp "$LOCAL_DIR"/yamsplus_*_linux_amd64.tar.gz "$WORK_DIR"/
   cp "$LOCAL_DIR"/checksums.txt "$WORK_DIR"/
-  [ ! -f "$LOCAL_DIR/checksums.txt.sig" ] || cp "$LOCAL_DIR"/checksums.txt.sig "$WORK_DIR"/
-  [ ! -f "$LOCAL_DIR/checksums.txt.pem" ] || cp "$LOCAL_DIR"/checksums.txt.pem "$WORK_DIR"/
+  [ ! -f "$LOCAL_DIR/checksums.txt.sigstore.json" ] || cp "$LOCAL_DIR"/checksums.txt.sigstore.json "$WORK_DIR"/
 else
-  [ -n "$VERSION" ] || { echo "--version is required for a release install." >&2; exit 1; }
-  TAG="v${VERSION#v}"
-  ASSET="yamsplus_${VERSION#v}_linux_amd64.tar.gz"
+  [ -n "$RELEASE_VERSION" ] || { echo "--version is required for a release install." >&2; exit 1; }
+  TAG="v${RELEASE_VERSION#v}"
+  ASSET="yamsplus_${RELEASE_VERSION#v}_linux_amd64.tar.gz"
   RELEASE_URL="${BASE_URL}/${TAG}"
   curl -fL "${RELEASE_URL}/${ASSET}" -o "$WORK_DIR/$ASSET"
   curl -fL "${RELEASE_URL}/checksums.txt" -o "$WORK_DIR/checksums.txt"
-  curl -fL "${RELEASE_URL}/checksums.txt.sig" -o "$WORK_DIR/checksums.txt.sig"
-  curl -fL "${RELEASE_URL}/checksums.txt.pem" -o "$WORK_DIR/checksums.txt.pem"
+  curl -fL "${RELEASE_URL}/checksums.txt.sigstore.json" -o "$WORK_DIR/checksums.txt.sigstore.json"
 fi
 
 if [ "$SKIP_SIGNATURE" = false ]; then
@@ -74,13 +74,12 @@ if [ "$SKIP_SIGNATURE" = false ]; then
     echo "cosign is required to verify the signed release. Install it from https://docs.sigstore.dev/cosign/system_config/installation/" >&2
     exit 1
   }
-  [ -f "$WORK_DIR/checksums.txt.sig" ] && [ -f "$WORK_DIR/checksums.txt.pem" ] || {
-    echo "Signed checksum files are missing. Refusing the install." >&2
+  if [ ! -f "$WORK_DIR/checksums.txt.sigstore.json" ]; then
+    echo "The signed checksum bundle is missing. Refusing the install." >&2
     exit 1
-  }
+  fi
   cosign verify-blob \
-    --certificate "$WORK_DIR/checksums.txt.pem" \
-    --signature "$WORK_DIR/checksums.txt.sig" \
+    --bundle "$WORK_DIR/checksums.txt.sigstore.json" \
     --certificate-identity-regexp '^https://github.com/arturict/yams-plus/.github/workflows/release.yml@refs/tags/v' \
     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
     "$WORK_DIR/checksums.txt"
@@ -91,7 +90,7 @@ fi
 cd "$WORK_DIR"
 ARCHIVE=$(find . -maxdepth 1 -name 'yamsplus_*_linux_amd64.tar.gz' -print -quit)
 [ -n "$ARCHIVE" ] || { echo "Release archive is missing." >&2; exit 1; }
-grep -F "  $(basename "$ARCHIVE")" checksums.txt | sha256sum --check -
+grep -E "  $(basename "$ARCHIVE")\$" checksums.txt | sha256sum --check -
 tar -xzf "$ARCHIVE" yamsplus
 install -m 0755 yamsplus /usr/local/bin/yamsplus
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -19,7 +20,10 @@ import (
 	"github.com/arturict/yams-plus/internal/doctor"
 	"github.com/arturict/yams-plus/internal/engine"
 	"github.com/arturict/yams-plus/internal/layout"
+	"github.com/arturict/yams-plus/internal/preflight"
 	"github.com/arturict/yams-plus/internal/secrets"
+	"github.com/arturict/yams-plus/internal/stack"
+	"github.com/arturict/yams-plus/internal/state"
 	"github.com/arturict/yams-plus/internal/wizard"
 	"golang.org/x/term"
 )
@@ -58,7 +62,9 @@ func run(args []string) error {
 	case "apply":
 		return apply(ctx, paths, args[1:])
 	case "status":
-		return runDoctor(ctx, paths, false, false)
+		// The human summary of the same checks doctor runs; skipping Docker here
+		// reported "healthy" with every container dead.
+		return runDoctor(ctx, paths, false, true)
 	case "doctor":
 		fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 		asJSON := fs.Bool("json", false, "machine-readable output")
@@ -85,7 +91,7 @@ func run(args []string) error {
 		}
 		return pluginAudit(ctx, paths, args[2:])
 	case "backup":
-		return backupCommand(paths, args[1:])
+		return backupCommand(ctx, paths, args[1:])
 	case "restore":
 		return restoreCommand(paths, args[1:])
 	case "update":
@@ -111,7 +117,10 @@ func pluginAudit(ctx context.Context, paths layout.Layout, args []string) error 
 	if err != nil {
 		return fmt.Errorf("jellyfin API token is unavailable; run apply first")
 	}
-	host := cfg.BindAddresses[0]
+	host, err := cfg.LocalHost()
+	if err != nil {
+		return err
+	}
 	api := apps.NewHTTPClient(fmt.Sprintf("http://%s:%d", host, cfg.Ports.Jellyfin))
 	api.Headers.Set("X-Emby-Token", token)
 	missing, err := (apps.Jellyfin{API: api}).AuditPlugins(ctx, cfg.Plugins.RequiredCompatible)
@@ -165,6 +174,18 @@ func install(ctx context.Context, paths layout.Layout, args []string) error {
 	var cfg config.Config
 	var password string
 	values := map[string]string{}
+	// The wizard and the prompts below collect the admin password and provider
+	// credentials, none of which are kept unless the install gets far enough to
+	// store them. Check the host first, so a missing Docker or a missing sudo
+	// is reported before anything has been typed rather than after.
+	if !*dryRun && !*skipStart {
+		if err := requireRoot(paths); err != nil {
+			return err
+		}
+		if err := preflight.Failed(preflight.Run(ctx, isProductionRoot(paths), nil, nil)); err != nil {
+			return err
+		}
+	}
 	if *configPath == "" {
 		result, err := wizard.New(os.Stdin, os.Stdout).Run()
 		if err != nil {
@@ -178,7 +199,7 @@ func install(ctx context.Context, paths layout.Layout, args []string) error {
 			return err
 		}
 		password = os.Getenv("YAMSPLUS_ADMIN_PASSWORD")
-		if password == "" && !*dryRun && !*skipStart && !bootstrapTokensSufficient(paths, cfg) {
+		if password == "" && !*dryRun && !*skipStart && adminPasswordNeeded(paths, cfg) {
 			password, err = secretPrompt("Admin password")
 			if err != nil {
 				return err
@@ -231,12 +252,17 @@ func apply(ctx context.Context, paths layout.Layout, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if !*dryRun && !*skipStart {
+		if err := requireRoot(paths); err != nil {
+			return err
+		}
+	}
 	cfg, err := config.Load(paths.ConfigFile())
 	if err != nil {
 		return err
 	}
 	password := os.Getenv("YAMSPLUS_ADMIN_PASSWORD")
-	if !*dryRun && !*skipStart && !bootstrapTokensSufficient(paths, cfg) {
+	if !*dryRun && !*skipStart && adminPasswordNeeded(paths, cfg) {
 		if password == "" {
 			password, err = secretPrompt("Admin password")
 			if err != nil {
@@ -282,12 +308,68 @@ func secretEnvSuffix(name string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(name))
 }
 
-func bootstrapTokensSufficient(paths layout.Layout, cfg config.Config) bool {
+func isProductionRoot(paths layout.Layout) bool {
+	return paths.Root == "/" || paths.Root == string(filepath.Separator)
+}
+
+// requireRoot refuses a real install or apply without root before any prompt.
+// Without it the run collected every answer and then failed creating
+// /etc/yamsplus with "permission denied".
+func requireRoot(paths layout.Layout) error {
+	if !isProductionRoot(paths) || runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		return nil
+	}
+	return errors.New("this writes to /etc/yamsplus, /var/lib/yamsplus and /opt/yamsplus and manages containers; rerun it with sudo")
+}
+
+// adminPasswordNeeded reports whether an apply must ask for the shared admin
+// password. YAMS Plus never stores it, and every service skips its login setup
+// when it is empty so that a re-apply cannot overwrite a working password with
+// nothing. That makes skipping the prompt safe only when every enabled service
+// finished converging on an earlier run and none needs the password again.
+// qBittorrent always does: its WebUI login is the password itself.
+func adminPasswordNeeded(paths layout.Layout, cfg config.Config) bool {
+	if cfg.Downloads.Mode == "torrent" || cfg.Downloads.Mode == "both" {
+		return true
+	}
 	store := secrets.Store{Dir: paths.SecretsDir()}
 	if !store.Exists("jellyfin_access_token") {
-		return false
+		return true
 	}
-	return !cfg.Modules.Books || store.Exists("shelfmark_session")
+	if cfg.Modules.Books && !store.Exists("shelfmark_session") {
+		return true
+	}
+	previous, err := state.Load(paths.StateFile())
+	if err != nil {
+		return true
+	}
+	for _, service := range convergedServices(cfg) {
+		if previous.Services[service] != "configured" {
+			return true
+		}
+	}
+	return false
+}
+
+// convergedServices lists the services apps.Converger records in state for cfg.
+func convergedServices(cfg config.Config) []string {
+	services := []string{"jellyfin", "seerr", "prowlarr"}
+	if cfg.Modules.Movies {
+		services = append(services, "radarr")
+	}
+	if cfg.Modules.Series {
+		services = append(services, "sonarr")
+	}
+	if cfg.Modules.Subtitles {
+		services = append(services, "bazarr")
+	}
+	if cfg.Downloads.Mode == "usenet" || cfg.Downloads.Mode == "both" {
+		services = append(services, "sabnzbd")
+	}
+	if cfg.Modules.Books {
+		services = append(services, "shelfmark", "audiobookshelf")
+	}
+	return services
 }
 
 func runDoctor(ctx context.Context, paths layout.Layout, asJSON, includeDocker bool) error {
@@ -325,10 +407,11 @@ func lifecycle(ctx context.Context, paths layout.Layout, action string) error {
 	return composeOutput(ctx, paths, "restart")
 }
 
-func backupCommand(paths layout.Layout, args []string) error {
+func backupCommand(ctx context.Context, paths layout.Layout, args []string) error {
 	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
 	output := fs.String("output", fmt.Sprintf("yamsplus-%s.tar.gz.age", time.Now().UTC().Format("20060102-150405")), "encrypted archive path")
 	includeSecrets := fs.Bool("include-secrets", true, "include provider and API secrets")
+	live := fs.Bool("live", false, "archive without stopping the running services; application databases may be inconsistent")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -336,11 +419,60 @@ func backupCommand(paths layout.Layout, args []string) error {
 	if err != nil {
 		return err
 	}
+	if !*live {
+		restart, err := stopForBackup(ctx, paths)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if restartErr := restart(); restartErr != nil {
+				fmt.Fprintln(os.Stderr, "Could not restart the stopped services:", restartErr)
+			}
+		}()
+	}
 	if err := backup.Create(paths, *output, passphrase, *includeSecrets); err != nil {
 		return err
 	}
 	fmt.Println("Created encrypted backup", *output)
 	return nil
+}
+
+// stopForBackup stops the running services and returns a function that starts
+// exactly those again. The applications keep their state in SQLite databases
+// they write continuously; copying a database and its write-ahead log file by
+// file while it changes can produce an archive that restores corrupt.
+func stopForBackup(ctx context.Context, paths layout.Layout) (func() error, error) {
+	noop := func() error { return nil }
+	if _, err := os.Stat(paths.ComposeFile()); os.IsNotExist(err) {
+		return noop, nil
+	}
+	client := composeClient(paths)
+	containers, err := client.PS(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("cannot tell which services are running, so they cannot be stopped for a consistent backup (use --live to archive them running): %w", err)
+	}
+	var running []string
+	for _, container := range containers {
+		if container.State == "running" {
+			running = append(running, container.Service)
+		}
+	}
+	if len(running) == 0 {
+		return noop, nil
+	}
+	fmt.Println("Stopping", strings.Join(running, ", "), "for a consistent backup...")
+	if _, err := client.Run(ctx, append([]string{"stop"}, running...)...); err != nil {
+		// Some services may already be down; bring back whatever stopped.
+		_, _ = client.Run(context.WithoutCancel(ctx), append([]string{"start"}, running...)...)
+		return nil, err
+	}
+	return func() error {
+		fmt.Println("Starting", strings.Join(running, ", "), "again...")
+		// The caller's context may be cancelled by now; the services must come
+		// back regardless.
+		_, err := client.Run(context.WithoutCancel(ctx), append([]string{"start"}, running...)...)
+		return err
+	}, nil
 }
 
 func restoreCommand(paths layout.Layout, args []string) error {
@@ -371,6 +503,41 @@ func updateCommand(ctx context.Context, paths layout.Layout, args []string) erro
 	if !*yes {
 		return errors.New("update requires --yes after reviewing stack.lock.yaml")
 	}
+	// The lock is embedded in the binary, so a newer binary carries newer
+	// digests. Pulling against the compose file already on disk would pull the
+	// digests the previous binary wrote and update nothing, even though the
+	// operations guide says update uses the reviewed stack.lock.yaml.
+	cfg, err := config.Load(paths.ConfigFile())
+	if err != nil {
+		return err
+	}
+	files, err := stack.Render(cfg, paths)
+	if err != nil {
+		return err
+	}
+	changes, err := stack.Plan(files)
+	if err != nil {
+		return err
+	}
+	stale := stack.Stale(paths, files)
+	for _, path := range stale {
+		changes = append(changes, stack.Change{Path: path, Action: "delete"})
+	}
+	for _, change := range changes {
+		fmt.Printf("%-10s %s\n", change.Action, change.Path)
+	}
+	if err := stack.Write(files); err != nil {
+		return err
+	}
+	if err := stack.Remove(stale); err != nil {
+		return err
+	}
+	// update runs as root and has just rewritten the Recyclarr configuration,
+	// which the Recyclarr container reads as PUID. Without this, profile syncs
+	// failed until the next apply restored ownership.
+	if err := stack.EnsureRuntimeOwnership(cfg, paths); err != nil {
+		return err
+	}
 	if err := composeOutput(ctx, paths, "pull"); err != nil {
 		return err
 	}
@@ -387,11 +554,13 @@ func uninstallCommand(ctx context.Context, paths layout.Layout, args []string) e
 	if !*yes {
 		return errors.New("uninstall requires --yes")
 	}
-	if err := composeClient(paths).Down(ctx); err != nil {
-		return err
-	}
+	// Refuse before touching anything. Tearing the stack down first and then
+	// declining left the host with no containers and a full configuration.
 	if *removeMedia {
 		return errors.New("media deletion requires the interactive safety workflow and is intentionally unavailable in the beta CLI")
+	}
+	if err := composeClient(paths).Down(ctx); err != nil {
+		return err
 	}
 	for _, target := range []string{paths.ConfigDir(), paths.StateDir(), paths.InstallDir()} {
 		if err := safeRemove(paths.Root, target); err != nil {
@@ -403,18 +572,34 @@ func uninstallCommand(ctx context.Context, paths layout.Layout, args []string) e
 }
 
 func safeRemove(root, target string) error {
-	rootAbs, err := filepath.Abs(root)
+	targetAbs, err := resolveUnder(root, target)
 	if err != nil {
 		return err
+	}
+	return os.RemoveAll(targetAbs)
+}
+
+// resolveUnder returns target as an absolute path strictly below root, or an
+// error. It touches no filesystem, so the uninstall guard is testable without
+// removing anything. The production root is "/", where the separator must not
+// be appended twice or every managed directory is refused.
+func resolveUnder(root, target string) (string, error) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
 	}
 	targetAbs, err := filepath.Abs(target)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if targetAbs == rootAbs || !strings.HasPrefix(targetAbs, rootAbs+string(filepath.Separator)) {
-		return fmt.Errorf("refusing to remove unsafe target %s", targetAbs)
+	prefix := rootAbs
+	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+		prefix += string(filepath.Separator)
 	}
-	return os.RemoveAll(targetAbs)
+	if targetAbs == rootAbs || !strings.HasPrefix(targetAbs, prefix) {
+		return "", fmt.Errorf("refusing to remove unsafe target %s", targetAbs)
+	}
+	return targetAbs, nil
 }
 
 func secretPrompt(label string) (string, error) {

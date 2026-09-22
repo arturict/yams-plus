@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-YAMS Plus is currently an early beta. Only the latest commit on `main` receives
-security fixes; no released version is supported yet.
+YAMS Plus is currently an early beta. Security fixes go to `main` and ship in
+the next release; only the latest release is supported.
 
 ## Reporting a vulnerability
 

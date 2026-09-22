@@ -17,6 +17,9 @@ type HTTPClient struct {
 	BaseURL string
 	Client  *http.Client
 	Headers http.Header
+	// Host, when set, replaces the Host header of every request, for a server
+	// that checks it against a port other than the one it is reached through.
+	Host string
 }
 
 func NewHTTPClient(baseURL string) *HTTPClient {
@@ -91,6 +94,9 @@ func (c *HTTPClient) DoJSON(ctx context.Context, method, path string, body, outp
 			req.Header.Add(name, value)
 		}
 	}
+	if c.Host != "" {
+		req.Host = c.Host
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -137,6 +143,26 @@ func (c *HTTPClient) DoForm(ctx context.Context, method, path string, values url
 	return nil
 }
 
+// ResponseCookies sends a GET to path and returns the cookies the response
+// sets, whatever its status. The cookie jar is bypassed on purpose: it drops
+// Secure cookies on plain HTTP, and a caller may need exactly those.
+func (c *HTTPClient) ResponseCookies(ctx context.Context, path string) ([]*http.Cookie, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.Host != "" {
+		req.Host = c.Host
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	return resp.Cookies(), nil
+}
+
 func (c *HTTPClient) DoFormText(ctx context.Context, method, path string, values url.Values, accepted ...int) (string, error) {
 	raw, err := c.doForm(ctx, method, path, values, accepted...)
 	return string(raw), err
@@ -151,6 +177,9 @@ func (c *HTTPClient) doForm(ctx context.Context, method, path string, values url
 		for _, value := range headers {
 			req.Header.Add(name, value)
 		}
+	}
+	if c.Host != "" {
+		req.Host = c.Host
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := c.Client.Do(req)

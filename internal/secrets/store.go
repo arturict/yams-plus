@@ -58,6 +58,18 @@ func (s Store) Read(name string) (string, error) {
 	return strings.TrimSpace(string(raw)), nil
 }
 
+// Remove deletes a stored value. Missing is not an error, so callers can clear
+// a marker unconditionally.
+func (s Store) Remove(name string) error {
+	if err := validateName(name); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(s.Dir, name)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 func (s Store) Exists(name string) bool {
 	if validateName(name) != nil {
 		return false

@@ -16,26 +16,33 @@ type Seerr struct{ API *HTTPClient }
 
 const seerrDefaultPermissions = 32 | 128 | 1024 | 8192 | 16384 | 32768 | 262144 | 524288 | 2048 | 4096 | 65536 | 131072 | 2097152 | 4194304
 
-func (s Seerr) Bootstrap(ctx context.Context, cfg config.Config, password, externalHost, existingAPIKey string) (string, error) {
+// Bootstrap initializes or signs in to Seerr, applies the main and network
+// settings and returns its API key. The boolean reports that Seerr must be
+// restarted, because it reads csrfProtection only at startup.
+func (s Seerr) Bootstrap(ctx context.Context, cfg config.Config, password, externalHost, existingAPIKey string) (string, bool, error) {
 	if err := s.API.Wait(ctx, "/api/v1/status", 5*time.Minute); err != nil {
-		return "", err
+		return "", false, err
+	}
+	csrfActive, err := s.useCSRFToken(ctx)
+	if err != nil {
+		return "", false, err
 	}
 	var public struct {
 		Initialized bool `json:"initialized"`
 	}
 	if err := s.API.DoJSON(ctx, http.MethodGet, "/api/v1/settings/public", nil, &public); err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !public.Initialized {
 		if password == "" {
-			return "", fmt.Errorf("Seerr is uninitialized and the admin password is unavailable")
+			return "", false, fmt.Errorf("Seerr is uninitialized and the admin password is unavailable")
 		}
 		login := map[string]any{"username": cfg.AdminUsername, "password": password, "hostname": "jellyfin", "port": 8096, "useSsl": false, "urlBase": "", "email": "", "serverType": 2}
 		if err := s.API.DoJSON(ctx, http.MethodPost, "/api/v1/auth/jellyfin", login, nil); err != nil {
-			return "", err
+			return "", false, err
 		}
 		if err := s.API.DoJSON(ctx, http.MethodPost, "/api/v1/settings/initialize", nil, &public); err != nil {
-			return "", err
+			return "", false, err
 		}
 	} else if existingAPIKey != "" {
 		s.API.Headers.Set("X-Api-Key", existingAPIKey)
@@ -44,12 +51,12 @@ func (s Seerr) Bootstrap(ctx context.Context, cfg config.Config, password, exter
 		// again makes Seerr 3.4 reject an otherwise valid Jellyfin sign-in.
 		login := map[string]any{"username": cfg.AdminUsername, "password": password}
 		if err := s.API.DoJSON(ctx, http.MethodPost, "/api/v1/auth/jellyfin", login, nil); err != nil {
-			return "", err
+			return "", false, err
 		}
 	}
 	var main map[string]any
 	if err := s.API.DoJSON(ctx, http.MethodGet, "/api/v1/settings/main", nil, &main); err != nil {
-		return "", err
+		return "", false, err
 	}
 	apiKey := fmt.Sprint(main["apiKey"])
 	delete(main, "apiKey") // read-only in Seerr's versioned OpenAPI contract
@@ -57,21 +64,60 @@ func (s Seerr) Bootstrap(ctx context.Context, cfg config.Config, password, exter
 	main["defaultPermissions"], main["localLogin"], main["mediaServerType"] = seerrDefaultPermissions, true, 2
 	main["partialRequestsEnabled"], main["versionCheck"] = true, true
 	if err := s.API.DoJSON(ctx, http.MethodPost, "/api/v1/settings/main", main, &main); err != nil {
-		return "", err
+		return "", false, err
 	}
+	// csrfProtection stays off. Seerr describes it as "set external API access
+	// to read-only (requires HTTPS)": it demands a token on every change, API-key
+	// requests included, and issues that token in Secure cookies that a browser
+	// on a plain-HTTP LAN or Tailscale address never sends back. Earlier
+	// releases turned it on, which broke every later apply.
 	var network map[string]any
-	if err := s.API.DoJSON(ctx, http.MethodGet, "/api/v1/settings/network", nil, &network); err == nil {
-		network["csrfProtection"] = true
-		network["trustProxy"] = false
-		_ = s.API.DoJSON(ctx, http.MethodPost, "/api/v1/settings/network", network, &network)
+	if err := s.API.DoJSON(ctx, http.MethodGet, "/api/v1/settings/network", nil, &network); err != nil {
+		return "", false, err
+	}
+	network["csrfProtection"] = false
+	network["trustProxy"] = false
+	if err := s.API.DoJSON(ctx, http.MethodPost, "/api/v1/settings/network", network, &network); err != nil {
+		return "", false, err
 	}
 	if existingAPIKey != "" && (apiKey == "" || apiKey == "<nil>") {
 		apiKey = existingAPIKey
 	}
 	if apiKey == "" || apiKey == "<nil>" {
-		return "", fmt.Errorf("Seerr returned an empty API key")
+		return "", false, fmt.Errorf("Seerr returned an empty API key")
 	}
-	return apiKey, s.enableLibraries(ctx)
+	return apiKey, csrfActive, s.enableLibraries(ctx)
+}
+
+// useCSRFToken makes every later request carry Seerr's CSRF token when
+// csrfProtection is active, and reports whether it is. Seerr issues the token
+// on every response but the secret cookie only to a request that lacks one, so
+// after an earlier request the secret may already be in the cookie jar rather
+// than in this response. Both are Secure cookies, which the jar does not send
+// to every plain-HTTP address, so they are attached by hand.
+func (s Seerr) useCSRFToken(ctx context.Context) (bool, error) {
+	cookies, err := s.API.ResponseCookies(ctx, "/api/v1/status")
+	if err != nil {
+		return false, err
+	}
+	if base, err := url.Parse(s.API.BaseURL); err == nil {
+		cookies = append(cookies, s.API.Client.Jar.Cookies(base)...)
+	}
+	var secret, token string
+	for _, cookie := range cookies {
+		switch {
+		case cookie.Name == "_csrf" && secret == "":
+			secret = cookie.Value
+		case cookie.Name == "XSRF-TOKEN" && token == "":
+			token = cookie.Value
+		}
+	}
+	if secret == "" || token == "" {
+		return false, nil
+	}
+	s.API.Headers.Set("Cookie", (&http.Cookie{Name: "_csrf", Value: secret}).String())
+	s.API.Headers.Set("X-XSRF-TOKEN", token)
+	return true, nil
 }
 
 func (s Seerr) enableLibraries(ctx context.Context) error {

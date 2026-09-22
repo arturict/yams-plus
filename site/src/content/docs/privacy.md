@@ -12,6 +12,8 @@ YAMS Plus, its command-line tool and the Jellyfin, Seerr and Arr services it ins
 The guide uses a self-hosted [Umami](https://umami.is/) instance at `umami.arturf.ch`. It records anonymous page views. On the landing page only, it also records a small set of interactions:
 
 - clicks on the install, exploration and selected navigation actions;
+- clicks on the outbound link to the upstream YAMS project, recorded only as
+  that one fixed category and never as the link text or destination URL;
 - first views of the hero, overview and included-features sections;
 - scroll milestones at 25, 50, 75 and 100 percent; and
 - active time milestones at 30, 60 and 120 seconds.

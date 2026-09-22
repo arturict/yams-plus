@@ -48,6 +48,22 @@ func (s Servarr) Authenticate(apiKey string) { s.API.Headers.Set("X-Api-Key", ap
 
 func (s Servarr) Wait(ctx context.Context) error { return s.API.Wait(ctx, "/ping", 5*time.Minute) }
 
+// EnsureAnalyticsDisabled turns off the anonymous usage and error reporting the
+// arr applications enable by default. The README promises the installed stack
+// carries no telemetry, and nothing was switching this off.
+func (s Servarr) EnsureAnalyticsDisabled(ctx context.Context) error {
+	path := s.prefix() + "/config/host"
+	var current map[string]any
+	if err := s.API.DoJSON(ctx, http.MethodGet, path, nil, &current); err != nil {
+		return err
+	}
+	if enabled, ok := current["analyticsEnabled"].(bool); ok && !enabled {
+		return nil
+	}
+	current["analyticsEnabled"] = false
+	return s.API.DoJSON(ctx, http.MethodPut, path, current, &current)
+}
+
 func (s Servarr) EnsureHostAuth(ctx context.Context, username, password string) error {
 	if password == "" {
 		return nil
@@ -85,6 +101,22 @@ type DownloadClientSpec struct {
 	Protocol       string
 	Priority       int
 	Fields         map[string]any
+}
+
+// HasDownloadClient reports whether a download client of this name already
+// exists, so a re-apply can decline to rebuild one whose credentials it does
+// not know rather than overwrite them with schema defaults.
+func (s Servarr) HasDownloadClient(ctx context.Context, name string) (bool, error) {
+	var existing []map[string]any
+	if err := s.API.DoJSON(ctx, http.MethodGet, s.prefix()+"/downloadclient", nil, &existing); err != nil {
+		return false, err
+	}
+	for _, item := range existing {
+		if strings.EqualFold(fmt.Sprint(item["name"]), name) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s Servarr) EnsureDownloadClient(ctx context.Context, wanted DownloadClientSpec) error {

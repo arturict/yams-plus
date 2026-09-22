@@ -36,7 +36,14 @@ func (e Engine) Plan(cfg config.Config) ([]stack.Change, error) {
 	if err != nil {
 		return nil, err
 	}
-	return stack.Plan(files)
+	changes, err := stack.Plan(files)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range stack.Stale(e.Options.Paths, files) {
+		changes = append(changes, stack.Change{Path: path, Action: "delete"})
+	}
+	return changes, nil
 }
 
 func (e Engine) Apply(ctx context.Context, cfg config.Config) error {
@@ -79,6 +86,10 @@ func (e Engine) Apply(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
+	stale := stack.Stale(e.Options.Paths, files)
+	for _, path := range stale {
+		changes = append(changes, stack.Change{Path: path, Action: "delete"})
+	}
 	for _, change := range changes {
 		out("%-10s %s\n", change.Action, change.Path)
 	}
@@ -107,6 +118,9 @@ func (e Engine) Apply(ctx context.Context, cfg config.Config) error {
 		}
 	}
 	if err := stack.Write(files); err != nil {
+		return err
+	}
+	if err := stack.Remove(stale); err != nil {
 		return err
 	}
 	configRaw, _ := yaml.Marshal(cfg)

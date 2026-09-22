@@ -46,9 +46,6 @@ func (b Bazarr) Converge(ctx context.Context, cfg config.Config, password, sonar
 		return err
 	}
 	values := url.Values{
-		"settings-auth-type":                     {"form"},
-		"settings-auth-username":                 {cfg.AdminUsername},
-		"settings-auth-password":                 {password},
 		"settings-general-use_sonarr":            {boolString(cfg.Modules.Series)},
 		"settings-general-use_radarr":            {boolString(cfg.Modules.Movies)},
 		"settings-general-serie_default_enabled": {boolString(cfg.Modules.Series)},
@@ -57,6 +54,19 @@ func (b Bazarr) Converge(ctx context.Context, cfg config.Config, password, sonar
 		"settings-general-movie_default_profile": {"1"},
 		"settings-general-enabled_providers":     {cfg.Subtitles.Provider},
 		"settings-general-chmod":                 {"0660"},
+		// Bazarr ships with analytics.enabled defaulting to true and then sends
+		// Google Analytics events naming the subtitle provider, languages and
+		// app versions. YAMS Plus promises an installed stack without telemetry.
+		"settings-analytics-enabled": {"false"},
+	}
+	// A re-apply that was not given the admin password must leave the existing
+	// credentials alone. Sending an empty password reset Bazarr's form auth to
+	// no password at all, and doctor stayed green because the endpoint answers
+	// either way.
+	if password != "" {
+		values.Set("settings-auth-type", "form")
+		values.Set("settings-auth-username", cfg.AdminUsername)
+		values.Set("settings-auth-password", password)
 	}
 	if cfg.Modules.Series {
 		values.Set("settings-sonarr-ip", "sonarr")
@@ -100,6 +110,10 @@ func (b Bazarr) Verify(ctx context.Context, cfg config.Config) error {
 	}
 	if cfg.Modules.Movies && !truthy(general["use_radarr"]) {
 		return fmt.Errorf("Bazarr did not retain the Radarr connection")
+	}
+	analytics, _ := settings["analytics"].(map[string]any)
+	if truthy(analytics["enabled"]) {
+		return fmt.Errorf("Bazarr kept its analytics enabled")
 	}
 	var profiles []map[string]any
 	if err := b.API.DoJSON(ctx, http.MethodGet, "/api/system/languages/profiles", nil, &profiles); err != nil {

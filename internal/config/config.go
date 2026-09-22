@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
+	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -177,10 +180,18 @@ func Save(path string, cfg Config) error {
 	return nil
 }
 
+var projectNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
 func (c Config) Validate() error {
 	var problems []string
 	if c.SchemaVersion != SchemaVersion {
 		problems = append(problems, fmt.Sprintf("schemaVersion must be %d", SchemaVersion))
+	}
+	// projectName names the Compose project, its containers and its network,
+	// and is written into compose.yaml unquoted, so it is held to Compose's
+	// own project-name rule.
+	if !projectNamePattern.MatchString(c.ProjectName) {
+		problems = append(problems, "projectName must start with a lowercase letter or digit and contain only lowercase letters, digits, dashes and underscores")
 	}
 	if strings.TrimSpace(c.AdminUsername) == "" {
 		problems = append(problems, "adminUsername is required")
@@ -220,13 +231,22 @@ func (c Config) Validate() error {
 			problems = append(problems, "downloads.vpn username and password secrets are required for OpenVPN")
 		}
 	}
+	if len(c.BindAddresses) == 0 {
+		problems = append(problems, "bindAddresses must list at least one loopback, private, or Tailscale IPv4 address")
+	}
 	for _, addr := range c.BindAddresses {
 		ip := net.ParseIP(addr)
 		if ip == nil {
 			problems = append(problems, fmt.Sprintf("invalid bind address %q", addr))
 			continue
 		}
-		if !ip.IsLoopback() && !ip.IsPrivate() && !strings.HasPrefix(addr, "100.") {
+		if ip.To4() == nil {
+			// Published ports are rendered as "ADDRESS:host:container", which is
+			// ambiguous for IPv6 literals, and every app URL is built the same way.
+			problems = append(problems, fmt.Sprintf("bind address %q must be IPv4", addr))
+			continue
+		}
+		if !ip.IsLoopback() && !ip.IsPrivate() && !IsTailscale(ip) {
 			problems = append(problems, fmt.Sprintf("bind address %q is not loopback, private, or Tailscale IPv4", addr))
 		}
 	}
@@ -266,6 +286,47 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// tailscaleCGNAT is the carrier-grade NAT range Tailscale assigns from.
+// Matching on the "100." prefix alone would accept publicly routed addresses
+// such as 100.24.5.6 (Amazon) and defeat the no-public-bind guard.
+var tailscaleCGNAT = netip.MustParsePrefix("100.64.0.0/10")
+
+// IsTailscale reports whether ip is inside Tailscale's 100.64.0.0/10 range.
+func IsTailscale(ip net.IP) bool {
+	addr, ok := netip.AddrFromSlice(ip.To4())
+	return ok && tailscaleCGNAT.Contains(addr)
+}
+
+// LocalHost returns the address the host itself uses to reach the published
+// application ports. A wildcard bind is not a routable destination, so it maps
+// to loopback; LAN and Tailscale addresses are returned unchanged.
+func (c Config) LocalHost() (string, error) {
+	if len(c.BindAddresses) == 0 {
+		return "", errors.New("config has no bindAddresses; set at least one loopback, private, or Tailscale IPv4 address")
+	}
+	host := c.BindAddresses[0]
+	if host == "0.0.0.0" {
+		return "127.0.0.1", nil
+	}
+	return host, nil
+}
+
+// recyclarrProfiles are the quality profiles the Recyclarr templates can
+// create. TRaSH publishes no 720p profile id, so 720p is a fallback tier the
+// 1080p profile accepts on the way to its cutoff, never a profile of its own.
+var recyclarrProfiles = []string{"1080p", "2160p"}
+
+// RenderedProfiles returns the selected profiles that are actually created.
+func RenderedProfiles(selected []string) []string {
+	rendered := make([]string, 0, len(selected))
+	for _, profile := range recyclarrProfiles {
+		if slices.Contains(selected, profile) {
+			rendered = append(rendered, profile)
+		}
+	}
+	return rendered
+}
+
 func validateQuality(name string, q MediaQuality, enabled bool) error {
 	if !enabled {
 		return nil
@@ -278,8 +339,18 @@ func validateQuality(name string, q MediaQuality, enabled bool) error {
 		}
 		seen[profile] = true
 	}
-	if !seen[q.DefaultProfile] {
-		return fmt.Errorf("quality.%s default must be one of its profiles", name)
+	if seen["720p"] && !seen["1080p"] {
+		return fmt.Errorf("quality.%s selects 720p without 1080p; 720p creates no profile because it is a fallback tier of the 1080p profile, not a profile of its own", name)
+	}
+	rendered := RenderedProfiles(q.Profiles)
+	if len(rendered) == 0 {
+		return fmt.Errorf("quality.%s must select 1080p or 2160p", name)
+	}
+	// Seerr requests with the default profile, so it has to be one Recyclarr
+	// actually creates; a 720p default passed here and then failed the install
+	// at the Seerr step, after every image had been pulled.
+	if !seen[q.DefaultProfile] || !slices.Contains(rendered, q.DefaultProfile) {
+		return fmt.Errorf("quality.%s default must be one of its selected profiles and either 1080p or 2160p, not %q", name, q.DefaultProfile)
 	}
 	return nil
 }

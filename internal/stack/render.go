@@ -94,6 +94,10 @@ func Render(cfg config.Config, paths layout.Layout) ([]RenderedFile, error) {
 			return "off"
 		},
 		"hasProfile": func(values []string, value string) bool { return slices.Contains(values, value) },
+		// Only the profiles the templates actually create may be referenced.
+		// Scoring a custom format against "YAMS+ 720p" made Recyclarr warn and
+		// drop the assignment, because no 720p profile is ever created.
+		"renderedProfiles": func(values []string) []string { return config.RenderedProfiles(values) },
 		"vpnEnabled": func() bool {
 			return cfg.Downloads.Usenet.UseVPN || ((cfg.Downloads.Mode == "torrent" || cfg.Downloads.Mode == "both") && cfg.Downloads.Torrent.UseVPN)
 		},
@@ -144,6 +148,35 @@ func Render(cfg config.Config, paths layout.Layout) ([]RenderedFile, error) {
 	return files, nil
 }
 
+// conditionalPaths are generated files that exist only while their module is
+// enabled. Disabling a module has to remove them, or Recyclarr keeps syncing a
+// profile to an application the stack no longer runs.
+func conditionalPaths(paths layout.Layout) []string {
+	return []string{
+		filepath.Join(paths.RecyclarrDir(), "configs", "radarr.yaml"),
+		filepath.Join(paths.RecyclarrDir(), "configs", "sonarr.yaml"),
+	}
+}
+
+// Stale returns generated files present on disk that the desired state no
+// longer contains.
+func Stale(paths layout.Layout, files []RenderedFile) []string {
+	desired := make(map[string]bool, len(files))
+	for _, file := range files {
+		desired[file.Path] = true
+	}
+	var stale []string
+	for _, path := range conditionalPaths(paths) {
+		if desired[path] {
+			continue
+		}
+		if _, err := os.Stat(path); err == nil {
+			stale = append(stale, path)
+		}
+	}
+	return stale
+}
+
 func Plan(files []RenderedFile) ([]Change, error) {
 	changes := make([]Change, 0, len(files))
 	for _, file := range files {
@@ -163,6 +196,16 @@ func Plan(files []RenderedFile) ([]Change, error) {
 		changes = append(changes, change)
 	}
 	return changes, nil
+}
+
+// Remove deletes generated files that left the desired state.
+func Remove(stale []string) error {
+	for _, path := range stale {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 func Write(files []RenderedFile) error {
@@ -261,16 +304,68 @@ func ensureDirectories(cfg config.Config, paths layout.Layout, enforceOwnership 
 		if strings.Contains(filepath.ToSlash(dir), "/srv/") || strings.Contains(filepath.ToSlash(dir), "/library") || strings.Contains(filepath.ToSlash(dir), "/downloads") {
 			mode = 0o770
 		}
-		if err := os.MkdirAll(dir, mode); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
-		}
-		if err := os.Chmod(dir, mode); err != nil {
-			return fmt.Errorf("set permissions on %s: %w", dir, err)
-		}
-		if enforceOwnership && runtime.GOOS != "windows" && (within(dir, appsRoot) || within(dir, dataRoot) || within(dir, recyclarrRoot)) {
-			if err := os.Chown(dir, cfg.Runtime.PUID, cfg.Runtime.PGID); err != nil {
-				return fmt.Errorf("set ownership on %s: %w", dir, err)
+		anchor := containerWritableAnchor(dir, recyclarrRoot, appsRoot, dataRoot)
+		if anchor == "" {
+			// Configuration, secrets, state and install directories are
+			// root-owned and never mounted writable into a container.
+			if err := os.MkdirAll(dir, mode); err != nil {
+				return fmt.Errorf("create %s: %w", dir, err)
 			}
+			if err := os.Chmod(dir, mode); err != nil {
+				return fmt.Errorf("set permissions on %s: %w", dir, err)
+			}
+			continue
+		}
+		if err := ensureContainerWritableDirectory(anchor, dir, mode, enforceOwnership, cfg.Runtime.PUID, cfg.Runtime.PGID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// containerWritableAnchor returns the innermost root of a tree that is
+// bind-mounted writable into a container, or "" when dir is in none of them.
+func containerWritableAnchor(dir string, roots ...string) string {
+	anchor := ""
+	for _, root := range roots {
+		if within(dir, root) && len(root) > len(anchor) {
+			anchor = root
+		}
+	}
+	return anchor
+}
+
+// ensureContainerWritableDirectory creates and converges a directory below a
+// tree that containers can write to. Those containers can replace any entry
+// below the anchor with a symlink, and os.MkdirAll, os.Chmod and os.Chown all
+// resolve symlinks, so a planted link would let a root-run apply change the
+// mode and owner of any directory on the host. os.Root resolves every
+// component with openat and refuses a path that leaves the anchor, which also
+// closes the race between checking a component and using it.
+func ensureContainerWritableDirectory(anchor, dir string, mode os.FileMode, enforceOwnership bool, uid, gid int) error {
+	// The anchor itself is chosen by the administrator (the data root may be a
+	// deliberate symlink to another disk), so it is created and opened normally.
+	if err := os.MkdirAll(anchor, mode); err != nil {
+		return fmt.Errorf("create %s: %w", anchor, err)
+	}
+	root, err := os.OpenRoot(anchor)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", anchor, err)
+	}
+	defer root.Close()
+	rel, err := filepath.Rel(anchor, dir)
+	if err != nil {
+		return err
+	}
+	if err := root.MkdirAll(rel, mode); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := root.Chmod(rel, mode); err != nil {
+		return fmt.Errorf("set permissions on %s: %w", dir, err)
+	}
+	if enforceOwnership && runtime.GOOS != "windows" {
+		if err := root.Chown(rel, uid, gid); err != nil {
+			return fmt.Errorf("set ownership on %s: %w", dir, err)
 		}
 	}
 	return nil
@@ -282,11 +377,20 @@ func EnsureRuntimeOwnership(cfg config.Config, paths layout.Layout) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	return filepath.Walk(paths.RecyclarrDir(), func(path string, _ os.FileInfo, err error) error {
+	return filepath.Walk(paths.RecyclarrDir(), func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if err := os.Chown(path, cfg.Runtime.PUID, cfg.Runtime.PGID); err != nil {
+		// This tree is bind-mounted into the Recyclarr container, which runs as
+		// PUID and can therefore create entries in it. os.Chown resolves a
+		// symlink and changes its target, so a planted link would hand a
+		// root-owned file such as /etc/shadow to PUID on the next apply.
+		// os.Lchown acts on the link itself, and a symlink here is never
+		// legitimate, so refuse it outright.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to converge ownership through symlink %s", path)
+		}
+		if err := os.Lchown(path, cfg.Runtime.PUID, cfg.Runtime.PGID); err != nil {
 			return fmt.Errorf("set ownership on %s: %w", path, err)
 		}
 		return nil

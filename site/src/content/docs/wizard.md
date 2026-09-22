@@ -27,9 +27,14 @@ The provider suggestions are neutral official links during beta. Newshosting and
 
 ## Quality rules
 
-- Movies: 1080p enabled by default; 720p and 2160p optional. Default is 1080p.
-- Series: 1080p enabled by default; 720p optional; 2160p is advanced.
+- Movies: 1080p enabled by default; 2160p optional. Default is 1080p.
+- Series: 1080p enabled by default; 2160p is advanced.
 - A title has one managed copy. A 1080p profile may temporarily accept 720p, then upgrade to cutoff.
+- 720p is that fallback tier, not a profile of its own: Recyclarr creates only
+  the 1080p and 4K profiles. The wizard offers 720p only after 1080p is
+  selected, and a configuration that lists 720p without 1080p is rejected.
+- The default quality, which Seerr requests with, is 1080p or 2160p. It is only
+  asked for when both are selected.
 - Original audio is preferred. Compatible SDR/HDR10 is allowed; Dolby Vision without HDR fallback is rejected.
 
 The final summary appears before files or containers are changed. `yamsplus plan --json` provides the same proposed file state without secret values.

@@ -19,10 +19,12 @@ least one indexer you are allowed to use in Prowlarr.
 
 This repository is public so the implementation can be inspected, tested and
 improved in the open. It is an early beta, not a signed production release.
-Configuration convergence and a credential-free Ubuntu smoke test have passed;
-the real authorised media-download flow and several UI-level plugin checks are
+Configuration convergence, an idempotent second apply, encrypted backup and
+restore, restart survival and a credential-free Ubuntu install have passed; the
+real authorised media-download flow and several UI-level plugin checks are
 still outstanding. The current evidence and known limits are recorded in the
-[beta report](acceptance/local-beta-report.md).
+[beta report](acceptance/local-beta-report.md), including a container scan that
+is not green.
 
 The installed stack has no telemetry. The separately deployed documentation
 uses privacy-conscious, self-hosted Umami analytics as described in the
@@ -35,7 +37,8 @@ uses privacy-conscious, self-hosted Umami analytics as described in the
   and Audiobookshelf modules.
 - App authentication, root folders, download clients, naming, libraries and
   private LAN, loopback or Tailscale port bindings.
-- Recyclarr-managed TRaSH profiles for selected 720p, 1080p and 4K shapes.
+- Recyclarr-managed TRaSH profiles for the selected 1080p and 4K shapes, with
+  720p available as a fallback tier the 1080p profile upgrades away from.
 - A compatible Jellyfin plugin pack with repeatable installation and auditing.
 - Stable `plan`, `doctor --json`, encrypted backup and idempotent `apply`
   workflows.
@@ -53,10 +56,20 @@ right to obtain.
 
 ARM64 and other distributions are not supported by this beta.
 
-## Try the source beta
+## Install
 
-There is no signed public CLI release yet. If you want to test the current
-source, inspect it first and build it on a supported host:
+Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/),
+then fetch the bootstrapper from the release tag, read it, and run it:
+
+```sh
+curl -fLO https://raw.githubusercontent.com/arturict/yams-plus/v0.1.0/install.sh
+less install.sh
+sudo sh install.sh --version 0.1.0
+```
+
+It verifies the Sigstore signature and checksum of the release before
+installing `yamsplus` and starting the wizard. To build from source instead,
+inspect it first and build it on a supported host:
 
 ```sh
 git clone https://github.com/arturict/yams-plus.git

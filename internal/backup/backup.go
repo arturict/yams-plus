@@ -85,6 +85,31 @@ func Restore(paths layout.Layout, source, passphrase string) error {
 	if err != nil {
 		return err
 	}
+	// Each managed tree is opened as an os.Root. Every write below resolves its
+	// path components with openat and is refused if any of them leaves the
+	// tree, so a symlink a container planted under the state directory cannot
+	// redirect a root-owned write. O_NOFOLLOW alone guarded only the last
+	// component, and os.MkdirAll followed the rest.
+	roots := map[string]*os.Root{}
+	defer func() {
+		for _, opened := range roots {
+			_ = opened.Close()
+		}
+	}()
+	openManaged := func(dir string) (*os.Root, error) {
+		if opened, ok := roots[dir]; ok {
+			return opened, nil
+		}
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return nil, err
+		}
+		opened, err := os.OpenRoot(dir)
+		if err != nil {
+			return nil, err
+		}
+		roots[dir] = opened
+		return opened, nil
+	}
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
@@ -93,23 +118,29 @@ func Restore(paths layout.Layout, source, passphrase string) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(root, filepath.FromSlash(header.Name))
-		resolved, err := filepath.Abs(target)
-		if err != nil || (resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator))) {
-			return fmt.Errorf("unsafe backup path %q", header.Name)
+		managed, rel, err := safeTarget(paths, root, header.Name)
+		if err != nil {
+			return err
+		}
+		tree, err := openManaged(managed)
+		if err != nil {
+			return err
 		}
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(resolved, os.FileMode(header.Mode)); err != nil {
-				return err
+			if err := tree.MkdirAll(rel, os.FileMode(header.Mode)); err != nil {
+				return fmt.Errorf("restore %s: %w", header.Name, err)
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(resolved), 0o750); err != nil {
-				return err
+			if err := tree.MkdirAll(filepath.Dir(rel), 0o750); err != nil {
+				return fmt.Errorf("restore %s: %w", header.Name, err)
 			}
-			out, err := os.OpenFile(resolved, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(header.Mode))
+			// os.Root would still follow a final-component symlink that stays
+			// inside the tree; O_NOFOLLOW refuses that too, so an entry is
+			// always written to the path the archive names.
+			out, err := tree.OpenFile(rel, os.O_CREATE|os.O_TRUNC|os.O_WRONLY|openNoFollow, os.FileMode(header.Mode))
 			if err != nil {
-				return err
+				return fmt.Errorf("restore %s: %w", header.Name, err)
 			}
 			if _, err := io.Copy(out, tarReader); err != nil {
 				_ = out.Close()
@@ -123,6 +154,34 @@ func Restore(paths layout.Layout, source, passphrase string) error {
 		}
 	}
 	return nil
+}
+
+// safeTarget confines an archive entry to one of the three directories Create
+// archives and returns that directory with the entry's path relative to it.
+// Confining to the install root alone is not enough: the production root is
+// "/", under which every absolute path qualifies, so a tampered archive could
+// write /root/.ssh/authorized_keys or /etc/cron.d as root. This check is
+// lexical; symlinks on disk are handled by opening the returned directory as
+// an os.Root.
+func safeTarget(paths layout.Layout, root, name string) (string, string, error) {
+	resolved, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(name)))
+	if err != nil {
+		return "", "", fmt.Errorf("unsafe backup path %q", name)
+	}
+	for _, managed := range []string{paths.ConfigDir(), paths.StateDir(), paths.InstallDir()} {
+		abs, err := filepath.Abs(managed)
+		if err != nil {
+			continue
+		}
+		if resolved == abs || strings.HasPrefix(resolved, abs+string(filepath.Separator)) {
+			rel, err := filepath.Rel(abs, resolved)
+			if err != nil {
+				return "", "", fmt.Errorf("unsafe backup path %q", name)
+			}
+			return abs, rel, nil
+		}
+	}
+	return "", "", fmt.Errorf("unsafe backup path %q", name)
 }
 
 func addTree(writer *tar.Writer, archiveRoot, source string, includeSecrets bool, secretsDir string) error {
