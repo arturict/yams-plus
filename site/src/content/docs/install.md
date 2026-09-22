@@ -60,7 +60,11 @@ sudo yamsplus apply
 ```
 
 On a prepared or resumed installation, `apply` securely asks for any provider
-secret that is still missing. Automation may supply the same values through
+secret that is still missing. It asks for the shared admin password when a
+service still has to set up its login, such as a module you just enabled, and
+on every run of a torrent or combined install, because qBittorrent signs in
+with that password and YAMS Plus never stores it. Automation may supply it as
+`YAMSPLUS_ADMIN_PASSWORD` and the provider secrets through
 `YAMSPLUS_SECRET_USENET_USERNAME`, `YAMSPLUS_SECRET_USENET_PASSWORD`,
 `YAMSPLUS_SECRET_SUBTITLES_USERNAME` and
 `YAMSPLUS_SECRET_SUBTITLES_PASSWORD`. Do not put those values in the YAML file

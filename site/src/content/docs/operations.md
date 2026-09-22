@@ -25,7 +25,7 @@ sudo yamsplus plan
 sudo yamsplus apply
 ```
 
-The shared UI password is requested again because YAMS Plus intentionally does not store it. Missing provider credentials are requested in the same hidden-input flow; already configured values are not requested again. Internal per-service API tokens remain separate in `/etc/yamsplus/secrets/` with mode `0600`.
+YAMS Plus never stores the shared UI password, so `apply` asks for it again whenever a service still needs it: a module that is being set up for the first time, and qBittorrent on every run of a torrent or combined install. Automation may supply it as `YAMSPLUS_ADMIN_PASSWORD`. Missing provider credentials are requested in the same hidden-input flow; already configured values are not requested again. Internal per-service API tokens remain separate in `/etc/yamsplus/secrets/` with mode `0600`.
 
 ## Updates
 

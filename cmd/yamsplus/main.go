@@ -21,6 +21,7 @@ import (
 	"github.com/arturict/yams-plus/internal/layout"
 	"github.com/arturict/yams-plus/internal/secrets"
 	"github.com/arturict/yams-plus/internal/stack"
+	"github.com/arturict/yams-plus/internal/state"
 	"github.com/arturict/yams-plus/internal/wizard"
 	"golang.org/x/term"
 )
@@ -184,7 +185,7 @@ func install(ctx context.Context, paths layout.Layout, args []string) error {
 			return err
 		}
 		password = os.Getenv("YAMSPLUS_ADMIN_PASSWORD")
-		if password == "" && !*dryRun && !*skipStart && !bootstrapTokensSufficient(paths, cfg) {
+		if password == "" && !*dryRun && !*skipStart && adminPasswordNeeded(paths, cfg) {
 			password, err = secretPrompt("Admin password")
 			if err != nil {
 				return err
@@ -242,7 +243,7 @@ func apply(ctx context.Context, paths layout.Layout, args []string) error {
 		return err
 	}
 	password := os.Getenv("YAMSPLUS_ADMIN_PASSWORD")
-	if !*dryRun && !*skipStart && !bootstrapTokensSufficient(paths, cfg) {
+	if !*dryRun && !*skipStart && adminPasswordNeeded(paths, cfg) {
 		if password == "" {
 			password, err = secretPrompt("Admin password")
 			if err != nil {
@@ -288,12 +289,54 @@ func secretEnvSuffix(name string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(name))
 }
 
-func bootstrapTokensSufficient(paths layout.Layout, cfg config.Config) bool {
+// adminPasswordNeeded reports whether an apply must ask for the shared admin
+// password. YAMS Plus never stores it, and every service skips its login setup
+// when it is empty so that a re-apply cannot overwrite a working password with
+// nothing. That makes skipping the prompt safe only when every enabled service
+// finished converging on an earlier run and none needs the password again.
+// qBittorrent always does: its WebUI login is the password itself.
+func adminPasswordNeeded(paths layout.Layout, cfg config.Config) bool {
+	if cfg.Downloads.Mode == "torrent" || cfg.Downloads.Mode == "both" {
+		return true
+	}
 	store := secrets.Store{Dir: paths.SecretsDir()}
 	if !store.Exists("jellyfin_access_token") {
-		return false
+		return true
 	}
-	return !cfg.Modules.Books || store.Exists("shelfmark_session")
+	if cfg.Modules.Books && !store.Exists("shelfmark_session") {
+		return true
+	}
+	previous, err := state.Load(paths.StateFile())
+	if err != nil {
+		return true
+	}
+	for _, service := range convergedServices(cfg) {
+		if previous.Services[service] != "configured" {
+			return true
+		}
+	}
+	return false
+}
+
+// convergedServices lists the services apps.Converger records in state for cfg.
+func convergedServices(cfg config.Config) []string {
+	services := []string{"jellyfin", "seerr", "prowlarr"}
+	if cfg.Modules.Movies {
+		services = append(services, "radarr")
+	}
+	if cfg.Modules.Series {
+		services = append(services, "sonarr")
+	}
+	if cfg.Modules.Subtitles {
+		services = append(services, "bazarr")
+	}
+	if cfg.Downloads.Mode == "usenet" || cfg.Downloads.Mode == "both" {
+		services = append(services, "sabnzbd")
+	}
+	if cfg.Modules.Books {
+		services = append(services, "shelfmark", "audiobookshelf")
+	}
+	return services
 }
 
 func runDoctor(ctx context.Context, paths layout.Layout, asJSON, includeDocker bool) error {

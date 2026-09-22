@@ -11,6 +11,7 @@ import (
 	"github.com/arturict/yams-plus/internal/engine"
 	"github.com/arturict/yams-plus/internal/layout"
 	"github.com/arturict/yams-plus/internal/secrets"
+	"github.com/arturict/yams-plus/internal/state"
 )
 
 func TestInstallSkipStartDoesNotRequireDocker(t *testing.T) {
@@ -207,5 +208,65 @@ func TestUpdateRewritesComposeFromTheEmbeddedLock(t *testing.T) {
 	}
 	if !bytes.Equal(after, current) {
 		t.Fatal("update did not restore the compose file from the embedded lock")
+	}
+}
+
+// A later apply may skip the admin password only when nothing it converges
+// needs it. The password is never stored, so qBittorrent needs it on every
+// login, and a service converging for the first time needs it to set up its
+// own login; without it that service came up with no authentication at all.
+func TestAdminPasswordNeeded(t *testing.T) {
+	configured := func(names ...string) map[string]string {
+		services := map[string]string{}
+		for _, name := range names {
+			services[name] = "configured"
+		}
+		return services
+	}
+	usenet := config.Default()
+	torrent := config.Default()
+	torrent.Downloads.Mode = "torrent"
+	both := config.Default()
+	both.Downloads.Mode = "both"
+	withBooks := config.Default()
+	withBooks.Modules.Books = true
+	full := configured("jellyfin", "seerr", "prowlarr", "radarr", "sonarr", "bazarr", "sabnzbd")
+
+	for _, tc := range []struct {
+		name     string
+		cfg      config.Config
+		tokens   []string
+		services map[string]string
+		want     bool
+	}{
+		{"fresh install", usenet, nil, nil, true},
+		{"every service already configured", usenet, []string{"jellyfin_access_token"}, full, false},
+		{"torrent always logs in to qBittorrent", torrent, []string{"jellyfin_access_token"}, configured("jellyfin", "seerr", "prowlarr", "radarr", "sonarr", "bazarr", "qbittorrent"), true},
+		{"both always logs in to qBittorrent", both, []string{"jellyfin_access_token"}, configured("jellyfin", "seerr", "prowlarr", "radarr", "sonarr", "bazarr", "sabnzbd", "qbittorrent"), true},
+		{"a module added since the last apply", usenet, []string{"jellyfin_access_token"}, configured("jellyfin", "seerr", "prowlarr", "radarr", "sonarr", "sabnzbd"), true},
+		{"last convergence failed", usenet, []string{"jellyfin_access_token"}, nil, true},
+		{"books without a Shelfmark session", withBooks, []string{"jellyfin_access_token"}, configured("jellyfin", "seerr", "prowlarr", "radarr", "sonarr", "bazarr", "sabnzbd", "shelfmark", "audiobookshelf"), true},
+		{"books fully configured", withBooks, []string{"jellyfin_access_token", "shelfmark_session"}, configured("jellyfin", "seerr", "prowlarr", "radarr", "sonarr", "bazarr", "sabnzbd", "shelfmark", "audiobookshelf"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			paths := layout.New(t.TempDir())
+			store := secrets.Store{Dir: paths.SecretsDir()}
+			for _, token := range tc.tokens {
+				if err := store.Write(token, "placeholder"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.services != nil {
+				if err := os.MkdirAll(paths.StateDir(), 0o750); err != nil {
+					t.Fatal(err)
+				}
+				if err := state.Save(paths.StateFile(), state.State{Phase: "configured", Services: tc.services}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := adminPasswordNeeded(paths, tc.cfg); got != tc.want {
+				t.Fatalf("adminPasswordNeeded = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
