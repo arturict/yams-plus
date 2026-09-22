@@ -1,8 +1,85 @@
 # Beta candidate evidence
 
-Two runs are recorded here. The 2026-09-21 run is the current state; the
-2026-08-07 run below it is the original beta-candidate evidence, kept because
-the container-scan comparison depends on it.
+Three runs are recorded here. The 2026-09-22 run is the current state; the
+2026-09-21 run and the original 2026-08-07 beta-candidate evidence stay below,
+because the container-scan comparison depends on them.
+
+# Run 3 — 2026-09-22
+
+Same host, against the branch after a release-readiness audit and its fixes.
+Isolated roots under `/tmp`, separate Compose projects (`ypaudit`,
+`ypaudit2`), loopback-only alternate ports, placeholder provider credentials,
+no indexer, no media, a random admin password never printed. The prepared
+production install under `/etc/yamsplus` and `/opt/yamsplus` was not touched.
+
+## Torrent install, never run end to end before
+
+Movies, series and subtitles with qBittorrent and no VPN. Run 2 exercised only
+the Usenet shape live, so its "clean second apply" said nothing about torrent,
+and this run found two defects before it could get to the one it was meant to
+check:
+
+- **qBittorrent 5.2 logins failed.** The lock moved qBittorrent to 5.2.3,
+  which answers a successful login with `204` and no body; the client accepted
+  only `Ok.`. Separately, until host-header validation is turned off,
+  qBittorrent refuses a Host port other than its own WebUI port, so a
+  published port other than 8081 got `401`. Reproduced by hand: `401` through
+  the remapped port, `204` with the container port, `204` through the
+  remapped port once validation was off. Both fixed.
+- **Seerr refused every apply after the first** with `403 invalid csrf token`,
+  because convergence had turned on Seerr's `csrfProtection`, which Seerr
+  describes as "set external API access to read-only (requires HTTPS)". Its
+  CSRF cookies are `Secure`, so a browser on a plain-HTTP LAN or Tailscale
+  address would not return them either. It is now left off, switched off where
+  it was on (one Seerr restart), and the write is no longer error-swallowed.
+  On a stack that already had it on: the first re-apply turned it off and
+  restarted Seerr, the second ran clean, API-key writes succeed.
+
+With those fixed, from a fresh root:
+
+| Step | Result |
+| --- | --- |
+| Install | exit 0 |
+| Second apply with the pre-fix password logic (built from the parent of that fix plus the qBittorrent fix), no password | exit 1: `qBittorrent login failed … 401 … temporary WebUI password was not found` |
+| Second apply with the fix | asked once for the password, exit 0 |
+| Third apply | exit 0, no Seerr restart |
+| `doctor --json` | 18 checks, 0 failed, 1 action required (the Prowlarr indexer) |
+| Bazarr `analytics.enabled` | `false` (the image defaults to `true`) |
+| Seerr `csrfProtection` | `false` |
+| qBittorrent login through the published port | admin password `204`, empty password `401` |
+
+## Usenet install with Books
+
+| Step | Result |
+| --- | --- |
+| Install | exit 0 |
+| Second apply with no password and no terminal | exit 0, zero password prompts |
+| `backup` of the running stack | stopped and restarted all nine running services, exit 0 |
+| `restore` into an empty root | `yamsplus.yaml`, `compose.yaml` and the lock byte-identical; secrets `0600` in a `0750` directory; wrong passphrase refused |
+
+The archive has no `jellyfin.db-wal` or `-shm`: Jellyfin was stopped and
+checkpointed before the copy. Every file the source had and the restore did
+not was written after the backup finished.
+
+A `doctor` run five seconds after the backup reported four endpoints down while
+the services were still booting. Measured separately: `doctor` 0 failed before,
+the backup took 16 seconds, and `doctor` was at 0 failed again 19 seconds
+after it returned. The stack is briefly unavailable during a backup, as the
+recovery guide now says.
+
+## Automated gates
+
+`go test -race ./...`, `go vet` for Linux and Windows, an arm64 build,
+Staticcheck v0.7.0 and Gitleaks green. The `cmd/yamsplus`, `internal/stack`
+and `internal/backup` tests also pass as root, locally and in CI's new root
+step.
+
+## Still not proven
+
+- The VPN shapes (Gluetun) live, which need VPN credentials.
+- The authorised media path, the UI-level plugin checks and the Debian 13 and
+  Ubuntu 24.04 VM scenarios, as before.
+- The container scan, as before.
 
 # Run 2 — 2026-09-21
 
