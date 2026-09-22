@@ -315,7 +315,7 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 	out("Connecting Seerr and enabling automatic requests...\n")
 	seerrAPI := NewHTTPClient(fmt.Sprintf("http://%s:%d", host, c.Config.Ports.Seerr))
 	seerr := Seerr{API: seerrAPI}
-	seerrKey, err := seerr.Bootstrap(ctx, c.Config, c.AdminPassword, host, readOptional("seerr_api_key"))
+	seerrKey, restartSeerr, err := seerr.Bootstrap(ctx, c.Config, c.AdminPassword, host, readOptional("seerr_api_key"))
 	if err != nil {
 		return result, err
 	}
@@ -330,6 +330,15 @@ func (c Converger) Run(ctx context.Context) (ConvergeResult, error) {
 	}
 	if sonarr := arrs["sonarr"]; sonarr != nil {
 		if err := seerr.EnsureServarr(ctx, c.Config, "sonarr", sonarr.profiles, sonarr.roots, sonarr.key); err != nil {
+			return result, err
+		}
+	}
+	if restartSeerr {
+		out("Restarting Seerr to turn off its CSRF protection...\n")
+		if _, err := c.Compose.Run(ctx, "restart", "seerr"); err != nil {
+			return result, err
+		}
+		if err := seerrAPI.Wait(ctx, "/api/v1/status", 5*time.Minute); err != nil {
 			return result, err
 		}
 	}
