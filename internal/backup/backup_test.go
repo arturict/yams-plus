@@ -47,12 +47,12 @@ func TestSafeTarget(t *testing.T) {
 		"var/lib/yamsplus/state.json",
 		"opt/yamsplus/compose.yaml",
 	} {
-		resolved, err := safeTarget(paths, root, name)
+		managed, rel, err := safeTarget(paths, root, name)
 		if err != nil {
 			t.Fatalf("managed path %q rejected under the production root: %v", name, err)
 		}
-		if want := filepath.Join(root, filepath.FromSlash(name)); resolved != want {
-			t.Fatalf("resolved = %q, want %q", resolved, want)
+		if got, want := filepath.Join(managed, rel), filepath.Join(root, filepath.FromSlash(name)); got != want {
+			t.Fatalf("resolved = %q, want %q", got, want)
 		}
 	}
 
@@ -66,17 +66,17 @@ func TestSafeTarget(t *testing.T) {
 		"etc/yamsplus-not-ours/file",
 		"usr/local/bin/yamsplus",
 	} {
-		if _, err := safeTarget(paths, root, name); err == nil {
+		if _, _, err := safeTarget(paths, root, name); err == nil {
 			t.Fatalf("entry %q must be refused under the production root", name)
 		}
 	}
 
 	// The same holds for a nested test root.
 	nested := layout.New(filepath.Join(root, "srv", "sandbox"))
-	if _, err := safeTarget(nested, nested.Root, "etc/yamsplus/yamsplus.yaml"); err != nil {
+	if _, _, err := safeTarget(nested, nested.Root, "etc/yamsplus/yamsplus.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := safeTarget(nested, nested.Root, "../../etc/shadow"); err == nil {
+	if _, _, err := safeTarget(nested, nested.Root, "../../etc/shadow"); err == nil {
 		t.Fatal("traversal outside the root must be refused")
 	}
 }

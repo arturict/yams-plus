@@ -304,16 +304,68 @@ func ensureDirectories(cfg config.Config, paths layout.Layout, enforceOwnership 
 		if strings.Contains(filepath.ToSlash(dir), "/srv/") || strings.Contains(filepath.ToSlash(dir), "/library") || strings.Contains(filepath.ToSlash(dir), "/downloads") {
 			mode = 0o770
 		}
-		if err := os.MkdirAll(dir, mode); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
-		}
-		if err := os.Chmod(dir, mode); err != nil {
-			return fmt.Errorf("set permissions on %s: %w", dir, err)
-		}
-		if enforceOwnership && runtime.GOOS != "windows" && (within(dir, appsRoot) || within(dir, dataRoot) || within(dir, recyclarrRoot)) {
-			if err := os.Chown(dir, cfg.Runtime.PUID, cfg.Runtime.PGID); err != nil {
-				return fmt.Errorf("set ownership on %s: %w", dir, err)
+		anchor := containerWritableAnchor(dir, recyclarrRoot, appsRoot, dataRoot)
+		if anchor == "" {
+			// Configuration, secrets, state and install directories are
+			// root-owned and never mounted writable into a container.
+			if err := os.MkdirAll(dir, mode); err != nil {
+				return fmt.Errorf("create %s: %w", dir, err)
 			}
+			if err := os.Chmod(dir, mode); err != nil {
+				return fmt.Errorf("set permissions on %s: %w", dir, err)
+			}
+			continue
+		}
+		if err := ensureContainerWritableDirectory(anchor, dir, mode, enforceOwnership, cfg.Runtime.PUID, cfg.Runtime.PGID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// containerWritableAnchor returns the innermost root of a tree that is
+// bind-mounted writable into a container, or "" when dir is in none of them.
+func containerWritableAnchor(dir string, roots ...string) string {
+	anchor := ""
+	for _, root := range roots {
+		if within(dir, root) && len(root) > len(anchor) {
+			anchor = root
+		}
+	}
+	return anchor
+}
+
+// ensureContainerWritableDirectory creates and converges a directory below a
+// tree that containers can write to. Those containers can replace any entry
+// below the anchor with a symlink, and os.MkdirAll, os.Chmod and os.Chown all
+// resolve symlinks, so a planted link would let a root-run apply change the
+// mode and owner of any directory on the host. os.Root resolves every
+// component with openat and refuses a path that leaves the anchor, which also
+// closes the race between checking a component and using it.
+func ensureContainerWritableDirectory(anchor, dir string, mode os.FileMode, enforceOwnership bool, uid, gid int) error {
+	// The anchor itself is chosen by the administrator (the data root may be a
+	// deliberate symlink to another disk), so it is created and opened normally.
+	if err := os.MkdirAll(anchor, mode); err != nil {
+		return fmt.Errorf("create %s: %w", anchor, err)
+	}
+	root, err := os.OpenRoot(anchor)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", anchor, err)
+	}
+	defer root.Close()
+	rel, err := filepath.Rel(anchor, dir)
+	if err != nil {
+		return err
+	}
+	if err := root.MkdirAll(rel, mode); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := root.Chmod(rel, mode); err != nil {
+		return fmt.Errorf("set permissions on %s: %w", dir, err)
+	}
+	if enforceOwnership && runtime.GOOS != "windows" {
+		if err := root.Chown(rel, uid, gid); err != nil {
+			return fmt.Errorf("set ownership on %s: %w", dir, err)
 		}
 	}
 	return nil

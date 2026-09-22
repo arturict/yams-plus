@@ -5,6 +5,7 @@ package stack
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/arturict/yams-plus/internal/config"
@@ -53,5 +54,70 @@ func TestEnsureRuntimeOwnershipAcceptsAPlainTree(t *testing.T) {
 	cfg.Runtime.PUID, cfg.Runtime.PGID = os.Getuid(), os.Getgid()
 	if err := EnsureRuntimeOwnership(cfg, paths); err != nil {
 		t.Fatalf("a plain tree must converge: %v", err)
+	}
+}
+
+// The media tree is mode 0770, owned by PUID and bind-mounted into Radarr,
+// Sonarr and the download clients, so a container can replace a managed
+// directory with a symlink. Every apply then ran os.Chmod and os.Chown on the
+// link, which act on its target anywhere on the host.
+func TestEnsureDirectoriesRefusesSymlinkOutOfManagedTree(t *testing.T) {
+	paths := layout.New(t.TempDir())
+	cfg := config.Default()
+	cfg.Runtime.PUID, cfg.Runtime.PGID = os.Getuid(), os.Getgid()
+	if err := EnsureRenderDirectories(cfg, paths); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.Mkdir(victim, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	movies := filepath.Join(paths.DataDir(cfg.DataRoot), "library", "movies")
+	if err := os.Remove(movies); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, movies); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, ensure := range map[string]func(config.Config, layout.Layout) error{
+		"render": EnsureRenderDirectories,
+		"apply":  EnsureDirectories,
+	} {
+		if err := ensure(cfg, paths); err == nil || !strings.Contains(err.Error(), "escapes") {
+			t.Errorf("%s: a symlink leaving the media tree must be refused, got %v", name, err)
+		}
+		info, err := os.Stat(victim)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("%s: victim mode changed through the symlink: %o", name, got)
+		}
+	}
+}
+
+// A parent component is as dangerous as the leaf: MkdirAll and Chmod resolve
+// library -> /elsewhere before they reach movies.
+func TestEnsureDirectoriesRefusesSymlinkedParent(t *testing.T) {
+	paths := layout.New(t.TempDir())
+	cfg := config.Default()
+	cfg.Runtime.PUID, cfg.Runtime.PGID = os.Getuid(), os.Getgid()
+	if err := EnsureRenderDirectories(cfg, paths); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	library := filepath.Join(paths.DataDir(cfg.DataRoot), "library")
+	if err := os.RemoveAll(library); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, library); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureDirectories(cfg, paths); err == nil || !strings.Contains(err.Error(), "escapes") {
+		t.Fatalf("a symlinked parent leaving the media tree must be refused, got %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "movies")); !os.IsNotExist(err) {
+		t.Fatalf("a directory was created outside the managed tree: %v", err)
 	}
 }
