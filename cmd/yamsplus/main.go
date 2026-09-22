@@ -91,7 +91,7 @@ func run(args []string) error {
 		}
 		return pluginAudit(ctx, paths, args[2:])
 	case "backup":
-		return backupCommand(paths, args[1:])
+		return backupCommand(ctx, paths, args[1:])
 	case "restore":
 		return restoreCommand(paths, args[1:])
 	case "update":
@@ -407,10 +407,11 @@ func lifecycle(ctx context.Context, paths layout.Layout, action string) error {
 	return composeOutput(ctx, paths, "restart")
 }
 
-func backupCommand(paths layout.Layout, args []string) error {
+func backupCommand(ctx context.Context, paths layout.Layout, args []string) error {
 	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
 	output := fs.String("output", fmt.Sprintf("yamsplus-%s.tar.gz.age", time.Now().UTC().Format("20060102-150405")), "encrypted archive path")
 	includeSecrets := fs.Bool("include-secrets", true, "include provider and API secrets")
+	live := fs.Bool("live", false, "archive without stopping the running services; application databases may be inconsistent")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -418,11 +419,60 @@ func backupCommand(paths layout.Layout, args []string) error {
 	if err != nil {
 		return err
 	}
+	if !*live {
+		restart, err := stopForBackup(ctx, paths)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if restartErr := restart(); restartErr != nil {
+				fmt.Fprintln(os.Stderr, "Could not restart the stopped services:", restartErr)
+			}
+		}()
+	}
 	if err := backup.Create(paths, *output, passphrase, *includeSecrets); err != nil {
 		return err
 	}
 	fmt.Println("Created encrypted backup", *output)
 	return nil
+}
+
+// stopForBackup stops the running services and returns a function that starts
+// exactly those again. The applications keep their state in SQLite databases
+// they write continuously; copying a database and its write-ahead log file by
+// file while it changes can produce an archive that restores corrupt.
+func stopForBackup(ctx context.Context, paths layout.Layout) (func() error, error) {
+	noop := func() error { return nil }
+	if _, err := os.Stat(paths.ComposeFile()); os.IsNotExist(err) {
+		return noop, nil
+	}
+	client := composeClient(paths)
+	containers, err := client.PS(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("cannot tell which services are running, so they cannot be stopped for a consistent backup (use --live to archive them running): %w", err)
+	}
+	var running []string
+	for _, container := range containers {
+		if container.State == "running" {
+			running = append(running, container.Service)
+		}
+	}
+	if len(running) == 0 {
+		return noop, nil
+	}
+	fmt.Println("Stopping", strings.Join(running, ", "), "for a consistent backup...")
+	if _, err := client.Run(ctx, append([]string{"stop"}, running...)...); err != nil {
+		// Some services may already be down; bring back whatever stopped.
+		_, _ = client.Run(context.WithoutCancel(ctx), append([]string{"start"}, running...)...)
+		return nil, err
+	}
+	return func() error {
+		fmt.Println("Starting", strings.Join(running, ", "), "again...")
+		// The caller's context may be cancelled by now; the services must come
+		// back regardless.
+		_, err := client.Run(context.WithoutCancel(ctx), append([]string{"start"}, running...)...)
+		return err
+	}, nil
 }
 
 func restoreCommand(paths layout.Layout, args []string) error {

@@ -11,6 +11,8 @@ sudo yamsplus backup --output yamsplus-$(date +%F).tar.gz.age
 
 You enter a passphrase interactively. Because the archive contains provider and API secrets, it is encrypted before it leaves the process.
 
+The applications keep their state in SQLite databases that change while they run, so `backup` stops the running services, archives them, and starts the same services again; expect a short interruption. `--live` skips that at the risk of an archive whose databases restore inconsistent.
+
 ## Test a restore
 
 Restore into an isolated root first:

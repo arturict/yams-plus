@@ -290,3 +290,53 @@ func TestInstallChecksTheHostBeforeTheWizard(t *testing.T) {
 		t.Fatalf("expected the missing Docker to stop the install before the wizard, got %v", err)
 	}
 }
+
+// Backups include the applications' SQLite databases, which change while the
+// containers run. A backup of an installed stack must stop the services first,
+// and must refuse rather than silently archive them running when it cannot.
+func TestBackupRefusesToArchiveServicesItCannotStop(t *testing.T) {
+	withStdin := func(t *testing.T, input string) {
+		reader, writer, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.WriteString(input); err != nil {
+			t.Fatal(err)
+		}
+		_ = writer.Close()
+		stdin := os.Stdin
+		os.Stdin = reader
+		t.Cleanup(func() { os.Stdin = stdin; _ = reader.Close() })
+	}
+	root := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "desired.yaml")
+	cfg := config.Default()
+	cfg.AdminUsername = "captain"
+	cfg.Downloads.Usenet.Host = "news.example.test"
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"--root", root, "install", "--config", configPath, "--skip-start"}); err != nil {
+		t.Fatal(err)
+	}
+	// Without Docker the running services cannot be listed or stopped.
+	t.Setenv("PATH", "")
+
+	archive := filepath.Join(t.TempDir(), "backup.tar.gz.age")
+	withStdin(t, "correct horse battery staple\n")
+	err := run([]string{"--root", root, "backup", "--output", archive})
+	if err == nil || !strings.Contains(err.Error(), "--live") {
+		t.Fatalf("expected the backup to refuse and name --live, got %v", err)
+	}
+	if _, err := os.Stat(archive); !os.IsNotExist(err) {
+		t.Fatalf("a refused backup left an archive behind: %v", err)
+	}
+
+	withStdin(t, "correct horse battery staple\n")
+	if err := run([]string{"--root", root, "backup", "--live", "--output", archive}); err != nil {
+		t.Fatalf("--live must archive without Docker: %v", err)
+	}
+	if _, err := os.Stat(archive); err != nil {
+		t.Fatal(err)
+	}
+}
