@@ -1,0 +1,19 @@
+version: "2"
+
+# Only godox for now. go vet and staticcheck keep running as their own steps
+# (Makefile security-check, CI go job), so golangci-lint does not duplicate them.
+linters:
+  default: none
+  enable:
+    - godox
+  settings:
+    godox:
+      # Coding agents copy excuse and follow-up-marker comments and then cite
+      # them as permission to paper over a problem. Comments that explain an
+      # invariant stay welcome; only these marker words are banned.
+      keywords:
+        - TODO
+        - FIXME
+        - HACK
+        - XXX
+        - WORKAROUND
