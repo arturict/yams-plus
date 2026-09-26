@@ -1,7 +1,10 @@
-.PHONY: test build site compose-check security-check
+.PHONY: test lint build site compose-check security-check
 
 test:
 	go test ./...
+
+lint:
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run ./...
 
 build:
 	CGO_ENABLED=0 go build -trimpath -o dist/yamsplus ./cmd/yamsplus
