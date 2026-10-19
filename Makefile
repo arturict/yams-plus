@@ -10,7 +10,7 @@ build:
 	CGO_ENABLED=0 go build -trimpath -o dist/yamsplus ./cmd/yamsplus
 
 site:
-	cd site && npm ci && npm run build
+	cd site && pnpm install --frozen-lockfile && pnpm run build
 
 compose-check:
 	go run ./cmd/yamsplus --root ./.yamsplus-test install --config examples/usenet.yaml --skip-start

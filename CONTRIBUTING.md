@@ -19,8 +19,8 @@ Thanks for helping make the installer less clicky and more predictable.
 3. Run `go test ./...`, `go vet ./...` and `make lint`. The lint rejects
    comments that start with TODO, FIXME, HACK, XXX or WORKAROUND: fix the
    problem or open an issue instead, and keep comments that explain why.
-4. For guide changes, run `npm ci`, `npm run build` and `npm run test:e2e` in
-   `site/`.
+4. For guide changes, run `pnpm install --frozen-lockfile`, `pnpm run build`
+   and `pnpm run test:e2e` in `site/`.
 5. Explain the user-visible change, verification and any remaining limit in
    the pull request.
 

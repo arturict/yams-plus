@@ -96,9 +96,9 @@ using it on a real host.
 go test ./...
 go vet ./...
 cd site
-npm ci
-npm run build
-npm run test:e2e
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm run test:e2e
 ```
 
 Generated Compose shapes can be checked with `make compose-check` on a host
