@@ -18,7 +18,7 @@ export default defineConfig({
   webServer: remoteBaseURL ? undefined : {
     // astro preview daemonises itself when it detects an agent or CI shell, and
     // Playwright then sees its foreground process exit and aborts the run.
-    command: `npm run build && ASTRO_PREVIEW_BACKGROUND=0 npm run preview -- --host 127.0.0.1 --port ${localPort}`,
+    command: `pnpm run build && ASTRO_PREVIEW_BACKGROUND=0 pnpm run preview --host 127.0.0.1 --port ${localPort}`,
     url: localBaseURL,
     reuseExistingServer: false,
     timeout: 120_000,
